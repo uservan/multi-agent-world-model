@@ -12,7 +12,7 @@ orch_output_cost: null      # cost per output token
 
 # Repetition / sampling
 n: 3                        # runs per task (each a different seed)
-base_seed: 0
+base_seed: 42
 temperature: 1.0
 max_completion_tokens: 16384
 max_turns: 100

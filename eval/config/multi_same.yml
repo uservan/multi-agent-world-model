@@ -19,7 +19,7 @@ sub_output_cost: null
 
 # Repetition / sampling
 n: 3
-base_seed: 0
+base_seed: 42
 temperature: 1.0
 max_completion_tokens: 16384
 max_turns: 100
