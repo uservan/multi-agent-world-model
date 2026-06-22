@@ -1,0 +1,59 @@
+"""Single-agent eval: one LLM, all platforms, http tool only."""
+from __future__ import annotations
+
+import random
+
+from loguru import logger
+
+from eval.agent import EventLog, ModelClient, run_agent_loop
+from eval.platform import PlatformRuntime
+from eval.prompts import build_single_agent_prompt
+from eval.scorer import score_task
+from eval.tools import make_http_executor
+
+
+async def run_task(
+    task: dict,
+    resources: dict[str, dict],
+    verifiers: dict[str, str],
+    orch: ModelClient,
+    seed: int,
+    max_turns: int,
+) -> dict:
+    """Run one single-agent attempt. Returns a complete trajectory dict."""
+    task_id = task["task_id"]
+    goal = task.get("prompt", "")
+
+    # Shuffle platform order for this run (hide any scene/ordering signal)
+    platforms = list(resources.keys())
+    random.Random(seed).shuffle(platforms)
+
+    runtime = PlatformRuntime(task_id)
+    event_log = EventLog()
+    try:
+        for p in platforms:
+            runtime.start(p, resources[p])
+        if not runtime.platforms:
+            raise RuntimeError("no platforms started")
+
+        system, user = build_single_agent_prompt(goal, runtime.platform_map())
+        executor = make_http_executor(runtime)
+        _, tokens = await run_agent_loop(
+            "agent", system, user, orch, executor, event_log, max_turns,
+        )
+
+        verifier_results, acc = score_task(runtime, verifiers, task_id)
+    finally:
+        runtime.cleanup()
+
+    return {
+        "task_id": task_id,
+        "run_idx": None,                 # filled by caller
+        "seed": seed,
+        "mode": "single",
+        "status": "complete",
+        "events": event_log.events,
+        "verifier_results": verifier_results,
+        "acc": acc,
+        "tokens": {"orch": tokens, "sub": {"in": 0, "out": 0}},
+    }

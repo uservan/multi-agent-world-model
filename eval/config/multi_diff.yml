@@ -1,0 +1,36 @@
+# Multi-agent eval — orchestrator + sub-agents, DIFFERENT models.
+# Run:  python eval_main.py --init eval/config/multi_diff.yml
+
+mode: multi
+
+# Orchestrator model (the planner)
+orch_model: gpt-4o
+orch_api_key: null
+orch_base_url: null
+orch_input_cost: null       # cost per input token  (editable any time; null = skip cost)
+orch_output_cost: null      # cost per output token
+
+# Sub-agent model (the workers) — a different/cheaper model
+sub_model: qwen2.5-7b
+sub_api_key: null
+sub_base_url: null
+sub_input_cost: null
+sub_output_cost: null
+
+# Repetition / sampling
+n: 3
+base_seed: 0
+temperature: 1.0
+max_completion_tokens: 16384
+max_turns: 100
+
+# Multi-agent concurrency
+max_concurrent: 4
+max_queue: 16
+
+# Data sources
+task_final: outputs/generated/verified/task_final.jsonl
+platforms_input: outputs/platforms.jsonl
+envs_input: outputs/generated/envs.jsonl
+databases_dir: outputs/generated/databases
+eval_root: outputs/eval

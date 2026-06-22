@@ -1,0 +1,6 @@
+export.sh
+.vscode
+.venv
+**/__pycache__
+
+outputs

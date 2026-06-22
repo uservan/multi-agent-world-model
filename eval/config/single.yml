@@ -1,0 +1,25 @@
+# Single-agent eval — one model does everything.
+# Run:  python eval_main.py --init eval/config/single.yml
+
+mode: single
+
+# The agent model
+orch_model: gpt-4o
+orch_api_key: null          # optional; falls back to env OPENAI_API_KEY
+orch_base_url: null         # optional; falls back to env OPENAI_BASE_URL
+orch_input_cost: null       # cost per input token  (editable any time; null = skip cost)
+orch_output_cost: null      # cost per output token
+
+# Repetition / sampling
+n: 3                        # runs per task (each a different seed)
+base_seed: 0
+temperature: 1.0
+max_completion_tokens: 16384
+max_turns: 100
+
+# Data sources
+task_final: outputs/generated/verified/task_final.jsonl
+platforms_input: outputs/platforms.jsonl
+envs_input: outputs/generated/envs.jsonl
+databases_dir: outputs/generated/databases
+eval_root: outputs/eval
