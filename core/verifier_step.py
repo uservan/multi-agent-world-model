@@ -357,6 +357,13 @@ Determine root_cause:
 - "data": required seed data is missing or wrong in the initial DB — the agent couldn't complete because data it needed wasn't there
 - "env": the server endpoint implementation is wrong — it returns incorrect values or has missing logic compared to the task_operations spec
 - "task": the task definition itself is the problem — goal lacks context the agent needs, expected outcome is wrong or impossible, or task_ops have incorrect values/steps; not fixable by data or env changes alone
+- "agent": NONE of the above — the seed data, the endpoints, AND the task definition are ALL correct, and the task IS solvable as-is. The verifier failed purely because the agent (solver) did not perform the required steps successfully: it skipped a needed write, gave up early, or used a value it invented instead of one it should have discovered via the API. This is NOT a defect to fix — the agent should simply try again.
+
+CRITICAL rule for "agent": only choose it when you can POSITIVELY confirm all three are fine:
+  1. the initial DB already contained every row the task needed (so NOT "data"), AND
+  2. the relevant endpoint code is correct (so NOT "env"), AND
+  3. the goal/expected_outcome/task_ops are all correct and achievable (so NOT "task").
+If you are unsure whether data, env, or task is at fault, do NOT pick "agent" — pick the actual defect instead. "agent" means "everything is correct, the solver just didn't do it."
 
 Then produce suggestions only for data and env paths, each in [Why]+[Fix] format:
 - "data": what seed data is missing or wrong and how to fix it
@@ -364,11 +371,11 @@ Then produce suggestions only for data and env paths, each in [Why]+[Fix] format
 - "env": what the server endpoint does wrong and how to fix it
   "[Why] <what the endpoint returns vs what task_operations expects> [Fix] <exactly what to change in the endpoint code>"
 
-Leave lists empty for paths that are not the root cause.
+Leave lists empty for paths that are not the root cause ("task" and "agent" produce no suggestions here).
 
 CRITICAL — Output format: single valid JSON object only
 {
-  "root_cause": "data" | "env" | "task",
+  "root_cause": "data" | "env" | "task" | "agent",
   "data_suggestions": [],
   "env_suggestions": [],
   "failure_summary": "refined explanation..."
@@ -1276,6 +1283,10 @@ def _analyze_verifier_failure(
             return {**empty, "data": s2.get("data_suggestions", [])}
         if root_cause2 == "env":
             return {**empty, "env": s2.get("env_suggestions", [])}
+        if root_cause2 == "agent":
+            # data + env + task are all confirmed correct; the solver just didn't
+            # do it. Not a defect — skip this round, let the agent try again later.
+            return {**empty, "_skip": True}
 
         # ── task path → Stage 3: goal / outcome / task_op suggestions ────────
         logger.info(f"[{task_id}::{platform}] verifier Stage 3: task definition fix")
@@ -1671,6 +1682,12 @@ def process_task(
                             sim_db=sim_db,
                             server_code=server_code,
                         )
+                        if vsug.get("_skip"):
+                            # Data + env + task all confirmed fine — the solver just
+                            # didn't complete it. Not a defect: skip this round with NO
+                            # suggestions; the task stays pending and is retried later.
+                            logger.info(f"[{task_id}::{platform}] agent fault (task is solvable) — skipping this round")
+                            return {"task_id": task_id, "status": "skipped", "suggestions": {}}
                         for k in ["verifier", "env", "data", "task_op", "goal_supplement", "outcome"]:
                             platform_suggestions[k].extend(vsug.get(k, []))
                 else:
