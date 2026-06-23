@@ -25,6 +25,7 @@ import re
 import shutil
 import sqlite3
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -1308,6 +1309,15 @@ def _analyze_verifier_failure(
 
 # ── HTTP agent helpers ─────────────────────────────────────────────────────────
 
+class _LLMUnavailable(Exception):
+    """The LLM call itself failed during simulation (transport/connection error).
+
+    This is an infrastructure problem, NOT a task defect — we must abort this
+    round's verification and leave the task pending, rather than analyze an empty
+    trajectory and generate bogus fix suggestions.
+    """
+
+
 async def _run_http_agent_loop(
     base_url: str,
     task_id: str,
@@ -1323,9 +1333,12 @@ async def _run_http_agent_loop(
     trajectory: list[dict] = []
 
     for iteration in range(1, max_iterations + 1):
-        content = await asyncio.get_running_loop().run_in_executor(
-            None, llm_client.complete, model, messages, 1024 * 8
-        )
+        try:
+            content = await asyncio.get_running_loop().run_in_executor(
+                None, llm_client.complete, model, messages, 1024 * 8
+            )
+        except Exception as e:
+            raise _LLMUnavailable(str(e)) from e
         tool_calls = _parse_tool_calls(content)
         messages.append({"role": "assistant", "content": content})
 
@@ -1452,6 +1465,8 @@ async def _simulate_platform_async(
             sub_traj = await _run_http_agent_loop(
                 f"http://127.0.0.1:{port}", task_id, llm_client, model, prompt, max_iterations,
             )
+        except _LLMUnavailable:
+            raise   # propagate (finally stops the server) — abort this task's verification
         except Exception as e:
             logger.warning(f"[{task_id}] {platform} sub_agent={ki} error: {e}")
         finally:
@@ -1596,6 +1611,12 @@ def process_task(
                         goal, context_data, platform, platform_desc,
                         client, gen_model, iterations_multiplier,
                     )
+                except _LLMUnavailable as e:
+                    # Infra error (LLM unreachable), not a task defect. Abort this round
+                    # with NO suggestions so nothing gets "fixed"; the task stays pending
+                    # (not added to verified_platforms) and is re-verified next round.
+                    logger.warning(f"[{task_id}::{platform}] LLM unavailable — skipping verification this round: {e}")
+                    return {"task_id": task_id, "status": "skipped", "suggestions": {}}
                 except Exception as e:
                     logger.warning(f"[{task_id}::{platform}] sim error: {e}")
                     all_suggestions[platform] = platform_suggestions
@@ -1729,12 +1750,23 @@ def process_batch(
     task_supplements = load_task_supplements(args.task_supplements_output)
     suggestions_dir = Path(args.verified_suggestions_dir)
 
-    client = LLMClient(api_key=args.api_key, base_url=args.base_url, aws_region=args.aws_region)
+    # One LLMClient per worker thread — a shared client's single httpx connection
+    # pool is not safe under this concurrency and intermittently raises
+    # "'_GeneratorContextManager' object has no attribute 'args'". Thread-local
+    # clients give each thread its own pool while still reusing connections.
+    _local = threading.local()
+
+    def _client() -> LLMClient:
+        c = getattr(_local, "client", None)
+        if c is None:
+            c = LLMClient(api_key=args.api_key, base_url=args.base_url, aws_region=args.aws_region)
+            _local.client = c
+        return c
 
     def _process(task: dict) -> dict:
         task_id = task["task_id"]
         return process_task(
-            client, args.model, args.gen_model,
+            _client(), args.model, args.gen_model,
             task, schemas, verifiers_gen,
             args.databases_dir,
             envs, args.max_retries, args.max_completion_tokens,

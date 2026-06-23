@@ -56,7 +56,7 @@ class PipelineConfig:
     # ── Fix pipeline ───────────────────────────────────────────────────────────
     agent_run_iterations_multiplier: int = 3  # max_iterations = len(sub_ops) * this
     fix_batch_size: int = 4
-    fix_concurrency: int = 6           # parallel workers for env_fix server revision
+    fix_concurrency: int = 8           # parallel workers for env_fix server revision
 
     def __post_init__(self) -> None:
         self.agent_run_max_iterations: int = self.max_steps_per_subagent * self.agent_run_iterations_multiplier
