@@ -39,7 +39,7 @@ async def run_task(
     max_queue: int,
 ) -> dict:
     """Run one multi-agent attempt. Returns a complete trajectory dict."""
-    task_id = task["task_id"]
+    task_id = task.get("task_id") or task["label"]
     goal = task.get("prompt", "")
 
     platforms = list(resources.keys())
@@ -113,10 +113,11 @@ async def run_task(
         return json.dumps({"error": f"unknown tool: {name}"})
 
     try:
+        # All-or-nothing: every platform must come up, else skip this run entirely
+        # (a partial platform set would make scoring meaningless).
         for p in platforms:
-            runtime.start(p, resources[p])
-        if not runtime.platforms:
-            raise RuntimeError("no platforms started")
+            if not runtime.start(p, resources[p]):
+                raise RuntimeError(f"platform failed to start: {p}")
 
         system, user = build_orchestrator_prompt(goal, runtime.platform_map(), max_concurrent, max_queue)
         _, orch_tokens = await run_agent_loop(

@@ -3,17 +3,17 @@
 
 mode: single
 
-# The agent model
-orch_model: gpt-4o
-orch_api_key: null          # optional; falls back to env OPENAI_API_KEY
-orch_base_url: null         # optional; falls back to env OPENAI_BASE_URL
-orch_input_cost: null       # cost per input token  (editable any time; null = skip cost)
-orch_output_cost: null      # cost per output token
+# The agent model — local sglang serving Qwen3.5-122B-A10B
+orch_model: Qwen3.5-122B-A10B
+orch_api_key: EMPTY              # sglang has no key; openai SDK just needs a non-empty value
+orch_base_url: http://127.0.0.1:30000/v1
+orch_input_cost: 0.00000026      # $0.26 / 1M tokens (OpenRouter ref)
+orch_output_cost: 0.00000208     # $2.08 / 1M tokens (OpenRouter ref)
 
 # Repetition / sampling
-n: 3                        # runs per task (each a different seed)
+n: 1                        # runs per task (each a different seed)
 base_seed: 42
-temperature: 1.0
+temperature: 0.6           # HuggingFace generation_config recommended value
 max_completion_tokens: 16384
 max_turns: 100
 

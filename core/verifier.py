@@ -1,4 +1,24 @@
 """
+⚠️ DEPRECATED — NOT USED. Do not import or run this module.
+
+This is the OLD monolithic verifier. It was split into three modules, which are
+the live pipeline (see main.py):
+    core/verifier_gen.py   — generate verifier functions
+    core/verifier_step.py  — simulate agents + run verifiers + collect suggestions  (ACTIVE)
+    core/verifier_fix.py   — apply fixes from suggestions
+
+Nothing imports core.verifier anymore (grep: 0 references).
+
+HISTORY / KNOWN PITFALL: the agent-simulation prompt here gave the solver only the
+action names (see `_build_sim_agent_prompt`, action-only) so it had to discover
+IDs/SKUs itself. That stripping was NOT carried over when the logic moved to the
+active verifier_step.py, which instead handed the solver the full task_operations
+including `params` (leaks IDs/SKUs) and `returns` (leaks the expected answer). That
+leak let unsolvable tasks pass verification (e.g. a platform whose search never
+exposes the SKU its detail endpoint requires). The action-only behavior has since
+been restored in verifier_step.py (`_ops_actions_only`). Kept only for reference.
+
+──────────────────────────────────────────────────────────────────────────────
 Generate verification functions for each task×platform and validate with agent simulation.
 
 Flow per task×platform:

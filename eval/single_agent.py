@@ -21,7 +21,7 @@ async def run_task(
     max_turns: int,
 ) -> dict:
     """Run one single-agent attempt. Returns a complete trajectory dict."""
-    task_id = task["task_id"]
+    task_id = task.get("task_id") or task["label"]
     goal = task.get("prompt", "")
 
     # Shuffle platform order for this run (hide any scene/ordering signal)
@@ -31,10 +31,11 @@ async def run_task(
     runtime = PlatformRuntime(task_id)
     event_log = EventLog()
     try:
+        # All-or-nothing: every platform must come up, else skip this run entirely
+        # (a partial platform set would make scoring meaningless).
         for p in platforms:
-            runtime.start(p, resources[p])
-        if not runtime.platforms:
-            raise RuntimeError("no platforms started")
+            if not runtime.start(p, resources[p]):
+                raise RuntimeError(f"platform failed to start: {p}")
 
         system, user = build_single_agent_prompt(goal, runtime.platform_map())
         executor = make_http_executor(runtime)

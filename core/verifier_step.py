@@ -67,7 +67,7 @@ Output each tool call as:
 Rules:
 - The X-Task-ID header is automatically injected into every api_call — you do NOT need to include it; ignore any mention of it in the OpenAPI spec
 - FIRST CALL: always start with GET /openapi.json to discover all available endpoints, their exact paths, and required parameters — never guess paths
-- Use the provided task operations as your step-by-step guide — follow their order and use the exact param values
+- The task operations list only the high-level action names as a reference outline — follow their order, but you MUST discover every concrete value (IDs, SKUs, parameters) yourself via the API (search/list/detail endpoints); exact param values are NOT provided
 - params: query string parameters (for GET/DELETE); body: JSON request body (for POST/PUT/PATCH)
 - After a create (POST) call, use the returned id to GET the created resource and confirm its full identifier before using it in subsequent path calls
 - When all steps are done, signal completion with a <done> block (no tool_call tags inside):
@@ -1371,6 +1371,23 @@ async def _run_http_agent_loop(
 
 # ── Agent simulation ───────────────────────────────────────────────────────────
 
+def _ops_actions_only(sub_ops: list) -> list:
+    """Reduce task operations to just their `action` names.
+
+    The solver is given the step outline as a reference, but NOT the concrete
+    `params` (which leak IDs/SKUs) or `returns` (which leak the expected answer).
+    It must discover every concrete value itself via the API — so verification
+    actually tests whether the task is solvable from discoverable information.
+    """
+    actions = []
+    for step in sub_ops:
+        if isinstance(step, dict) and step.get("action"):
+            actions.append({"action": step["action"]})
+        elif isinstance(step, str) and step:
+            actions.append({"action": step})
+    return actions
+
+
 def _build_agent_prompt(
     goal: str,
     platform: str,
@@ -1381,7 +1398,7 @@ def _build_agent_prompt(
     context_data: dict,
     prior_results: list,
 ) -> str:
-    ops_str = json.dumps(sub_ops, ensure_ascii=False, indent=2)
+    ops_str = json.dumps(_ops_actions_only(sub_ops), ensure_ascii=False, indent=2)
 
     parts = []
     if context_data:

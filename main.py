@@ -235,7 +235,7 @@ def main() -> None:
     defaults = PipelineConfig()
     parser = argparse.ArgumentParser(description="Multi-agent world model data generation pipeline")
 
-    parser.add_argument("--mode", type=str, default="finalize", choices=["generate", "fix", "debug", "finalize"],
+    parser.add_argument("--mode", type=str, default="fix", choices=["generate", "fix", "debug", "finalize"],
                         help="Pipeline mode: 'generate' for data generation, 'fix' for revision, "
                              "'debug' for sequential fix, 'finalize' to consolidate verified tasks into task_final.jsonl")
 

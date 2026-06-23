@@ -17,12 +17,26 @@ def _platform_section(platform_map: dict[str, dict]) -> str:
 
 
 _HTTP_TOOL = """\
-Call any platform's REST API with the http tool:
+Call any platform's REST API with the http tool, using exactly this format:
 <tool_call>
-{"name": "http", "arguments": {"method": "GET|POST|PUT|PATCH|DELETE", "base_url": "<platform_url>", "path": "/<endpoint>", "params": {...}}}
+<function=http>
+<parameter=method>
+GET
+</parameter>
+<parameter=base_url>
+<platform_url>
+</parameter>
+<parameter=path>
+/<endpoint>
+</parameter>
+<parameter=params>
+{"key": "value"}
+</parameter>
+</function>
 </tool_call>
 
-- For GET/DELETE, params are query-string parameters; for POST/PUT/PATCH, params are the JSON body.
+- method is one of GET/POST/PUT/PATCH/DELETE.
+- params is a JSON object: for GET/DELETE it is the query-string parameters; for POST/PUT/PATCH it is the JSON body. Use {} if there are none.
 - The X-Task-ID header is injected automatically — do not include it.
 - First call for each platform you use: GET /openapi.json to discover its exact endpoints and parameters. Never guess paths."""
 
@@ -50,13 +64,31 @@ You may delegate subtasks to sub-agents (up to {max_concurrent} running at once,
 
 Spawn a sub-agent (non-blocking, returns a task_id):
 <tool_call>
-{{"name": "spawn_subagent", "arguments": {{"description": "<full instructions, INCLUDING the exact platform URL(s) the sub-agent must use>", "return_requirements": "<what the sub-agent should report back>"}}}}
+<function=spawn_subagent>
+<parameter=description>
+<full instructions, INCLUDING the exact platform URL(s) the sub-agent must use>
+</parameter>
+<parameter=return_requirements>
+<what the sub-agent should report back>
+</parameter>
+</function>
 </tool_call>
 
 Collect results:
 <tool_call>
-{{"name": "get_task_results", "arguments": {{"task_ids": ["<task_id>", ...], "blocking": true, "timeout": 30}}}}
+<function=get_task_results>
+<parameter=task_ids>
+["<task_id>", ...]
+</parameter>
+<parameter=blocking>
+true
+</parameter>
+<parameter=timeout>
+30
+</parameter>
+</function>
 </tool_call>
+- task_ids is a JSON array; blocking is true/false; timeout is seconds.
 - blocking=false: finished tasks return their result, unfinished return "pending".
 - blocking=true: waits until all listed tasks finish or timeout."""
 

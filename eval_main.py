@@ -28,20 +28,23 @@ from eval.config import EvalConfig
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Multi-agent world model — agent eval")
-    g = parser.add_mutually_exclusive_group(required=True)
+    g = parser.add_mutually_exclusive_group(required=False)
     g.add_argument("--init", metavar="TEMPLATE_YML",
-                   help="Start a NEW run from a config template (e.g. eval/config/single.yml).")
-    g.add_argument("--config", metavar="RUN_DIR",
+                   help="Start a NEW run from a config template (default: eval/config/single.yml).")
+    g.add_argument("--config", metavar="RUN_DIR", default="outputs/eval/single__Qwen3.5-122B-A10B__single__20260622_231527/config.yml",
                    help="Resume an existing run folder (cached tasks are skipped).")
+    parser.add_argument("--parallel", type=int, default=1,
+                        help="Number of task-runs to execute concurrently (default: 8).")
     args = parser.parse_args()
 
     try:
-        if args.init:
+        # --config (resume) wins when given; otherwise --init (which has a default).
+        if args.config:
+            cfg = EvalConfig.load_run(args.config)
+        else:
             cfg = EvalConfig.init_run(args.init)
             logger.success(f"New eval run: {cfg.run_dir}")
-        else:
-            cfg = EvalConfig.load_run(args.config)
-        eval_run.run(cfg)
+        eval_run.run(cfg, parallel=args.parallel)
     except (ValueError, FileNotFoundError) as e:
         logger.error(str(e))
         sys.exit(1)

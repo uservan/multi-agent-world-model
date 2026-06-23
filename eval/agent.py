@@ -13,8 +13,20 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from utils.agent_io import parse_tool_calls
+from utils.agent_io import parse_tool_calls_detailed
 from utils.llm import LLMClient
+
+
+def _format_parse_errors(errors: list[str]) -> str:
+    """Feedback message handed back to the model when its tool calls don't parse."""
+    return (
+        "Some of your <tool_call> blocks could not be parsed and were ignored:\n"
+        + "\n".join(errors)
+        + "\n\nFix the JSON and re-issue them. Each tool call must be ONE valid JSON "
+        "object inside <tool_call> tags, with balanced braces, e.g.:\n"
+        '<tool_call>\n{"name": "http", "arguments": {"method": "GET", "base_url": "<url>", '
+        '"path": "/<endpoint>", "params": {}}}\n</tool_call>'
+    )
 
 
 # ── LLM holder ─────────────────────────────────────────────────────────────────
@@ -93,13 +105,20 @@ async def run_agent_loop(
         final_text = text
         total["in"] += usage.get("in", 0)
         total["out"] += usage.get("out", 0)
+        # `text` is clean content (reasoning is carried out-of-band in `usage` and
+        # recorded via event_log, never fed back to the model).
         messages.append({"role": "assistant", "content": text})
 
-        tool_calls = parse_tool_calls(text)
+        tool_calls, parse_errors = parse_tool_calls_detailed(text)
         done = "<done>" in text
 
         if not tool_calls:
             event_log.add(actor, text, tokens=usage)
+            # The model tried to call tools but every block failed to parse → tell it
+            # what broke so it can retry, instead of silently ending the episode.
+            if parse_errors and not done:
+                messages.append({"role": "user", "content": _format_parse_errors(parse_errors)})
+                continue
             break
 
         responses: list[str] = []
@@ -113,6 +132,9 @@ async def run_agent_loop(
         if done:
             break
 
-        messages.append({"role": "user", "content": "Tool results:\n" + "\n---\n".join(responses)})
+        result_text = "Tool results:\n" + "\n---\n".join(responses)
+        if parse_errors:  # some calls ran, others were malformed — note the ignored ones
+            result_text += "\n\n" + _format_parse_errors(parse_errors)
+        messages.append({"role": "user", "content": result_text})
 
     return final_text, total

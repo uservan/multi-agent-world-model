@@ -6,7 +6,9 @@ which one to call. This module just executes.
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
+import threading
 
 from loguru import logger
 
@@ -47,7 +49,7 @@ async def _run_one(cfg, task, resources, verifiers, orch, sub, run_idx) -> dict:
     return traj
 
 
-def run(cfg: EvalConfig) -> None:
+def run(cfg: EvalConfig, parallel: int = 8) -> None:
     cfg.traj_dir.mkdir(parents=True, exist_ok=True)
 
     tasks = eval_data.load_tasks(cfg.task_final)
@@ -56,10 +58,12 @@ def run(cfg: EvalConfig) -> None:
     orch, sub = _model_clients(cfg)
 
     total = len(tasks) * cfg.n
-    done = skipped = 0
+    skipped = 0
 
+    # Build the pending work list (cached/complete trajectories are skipped up front).
+    pending: list[tuple] = []
     for task in tasks:
-        task_id = task["task_id"]
+        task_id = task.get("task_id") or task["label"]
         platforms = eval_data.task_platforms(task)
         resources = eval_data.resolve_resources(platforms, descriptions, server_paths, cfg.databases_dir)
         verifiers = task.get("metadata", {}).get("verifiers", {})
@@ -76,13 +80,32 @@ def run(cfg: EvalConfig) -> None:
                         continue
                 except Exception:
                     pass
-            try:
-                traj = asyncio.run(_run_one(cfg, task, resources, verifiers, orch, sub, run_idx))
-                traj_file.write_text(json.dumps(traj, ensure_ascii=False, indent=2), encoding="utf-8")
+            pending.append((task, task_id, resources, verifiers, run_idx, traj_file))
+
+    logger.info(f"{len(pending)} runs to execute, {skipped} cached, concurrency={parallel}")
+
+    done = 0
+    lock = threading.Lock()
+
+    # Each task-run is fully blocking (server startup, verifier exec), so we run
+    # each one in its own thread with its own event loop — real cross-task parallelism.
+    def _execute(item: tuple) -> None:
+        nonlocal done
+        task, task_id, resources, verifiers, run_idx, traj_file = item
+        try:
+            traj = asyncio.run(_run_one(cfg, task, resources, verifiers, orch, sub, run_idx))
+            traj_file.write_text(json.dumps(traj, ensure_ascii=False, indent=2), encoding="utf-8")
+            with lock:
                 done += 1
-                logger.info(f"[{task_id}-{run_idx}] acc={traj['acc']:.2f} ({done+skipped}/{total})")
-            except Exception as e:
-                logger.error(f"[{task_id}-{run_idx}] failed: {e}")
+                n = done + skipped
+            logger.info(f"[{task_id}-{run_idx}] acc={traj['acc']:.2f} ({n}/{total})")
+        except Exception as e:
+            logger.error(f"[{task_id}-{run_idx}] failed: {e}")
+
+    if pending:
+        workers = max(1, min(parallel, len(pending)))
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+            list(ex.map(_execute, pending))
 
     logger.success(f"Eval runs done: {done} new, {skipped} cached. Aggregating…")
     _aggregate(cfg)

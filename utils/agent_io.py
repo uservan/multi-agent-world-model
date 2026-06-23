@@ -7,28 +7,75 @@ from __future__ import annotations
 import json
 import re
 
+_THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+_TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
+_FUNCTION_RE = re.compile(r"<function\s*=\s*([^>\s]+)\s*>(.*?)</function>", re.DOTALL)
+_PARAMETER_RE = re.compile(r"<parameter\s*=\s*([^>\s]+)\s*>\s*(.*?)\s*</parameter>", re.DOTALL)
+
+
+def _coerce(value: str):
+    """Parameter values are raw text; JSON-decode when possible (dict/list/number/bool)."""
+    try:
+        return json.loads(value)
+    except Exception:
+        return value
+
+
+def _parse_block(raw: str) -> tuple[str, dict]:
+    """Parse one <tool_call> body into (name, arguments).
+
+    Accepts two forms:
+      1. JSON:  {"name": "http", "arguments": {...}}
+      2. Qwen native XML:  <function=http><parameter=k>v</parameter>...</function>
+    Raises ValueError if neither matches.
+    """
+    # 1) JSON form
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list) and data:
+            data = data[0]
+        if isinstance(data, dict):
+            return data.get("name", ""), (data.get("arguments") or {})
+    except Exception:
+        pass
+    # 2) Native XML form (what the Qwen3.5 models reliably emit)
+    fm = _FUNCTION_RE.search(raw)
+    if fm:
+        name = fm.group(1).strip()
+        args = {k.strip(): _coerce(v) for k, v in _PARAMETER_RE.findall(fm.group(2))}
+        return name, args
+    raise ValueError("neither valid JSON nor a <function=...> block")
+
+
+def parse_tool_calls_detailed(content: str) -> tuple[list[dict], list[str]]:
+    """Extract tool calls from <tool_call>...</tool_call> blocks in LLM output.
+
+    Returns (calls, errors). `errors` describes any <tool_call> block that was
+    present but could not be parsed, so callers can feed the reason back to the
+    model instead of silently dropping the turn.
+    """
+    calls: list[dict] = []
+    errors: list[str] = []
+    # Ignore tool-call drafts inside the model's reasoning so they aren't executed.
+    content = _THINK_RE.sub("", content)
+    for i, m in enumerate(_TOOL_CALL_RE.findall(content)):
+        raw = m.strip()
+        try:
+            name, args = _parse_block(raw)
+        except Exception as e:
+            snippet = raw if len(raw) <= 200 else raw[:200] + "…"
+            errors.append(f"tool_call #{i + 1}: could not parse — {e}. Received: {snippet}")
+            continue
+        if name.startswith("mcp_tool_"):
+            args = {"tool_name": name, "arguments": args or {}}
+            name = "call_tool"
+        calls.append({"id": f"call_{i}", "name": name, "arguments": args})
+    return calls, errors
+
 
 def parse_tool_calls(content: str) -> list[dict]:
-    """Extract tool calls from <tool_call>...</tool_call> blocks in LLM output."""
-    calls = []
-    for i, m in enumerate(
-        re.findall(r"<tool_call>\s*(.*?)\s*</tool_call>", content, re.DOTALL)
-    ):
-        try:
-            data = json.loads(m.strip())
-            if isinstance(data, list) and data:
-                data = data[0]
-            if not isinstance(data, dict):
-                continue
-            name = data.get("name", "")
-            args = data.get("arguments", {})
-            if name.startswith("mcp_tool_"):
-                args = {"tool_name": name, "arguments": args or {}}
-                name = "call_tool"
-            calls.append({"id": f"call_{i}", "name": name, "arguments": args})
-        except Exception:
-            continue
-    return calls
+    """Extract tool calls from <tool_call>...</tool_call> blocks (errors dropped)."""
+    return parse_tool_calls_detailed(content)[0]
 
 
 def format_tools_text(tools: list[dict]) -> str:

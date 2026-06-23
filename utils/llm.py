@@ -61,12 +61,16 @@ class LLMClient:
         if temperature is not None:
             kwargs["temperature"] = temperature
         response = self._openai().chat.completions.create(**kwargs)
-        text = response.choices[0].message.content or ""
+        msg = response.choices[0].message
+        text = msg.content or ""               # clean content (server's reasoning_parser splits <think> out)
         usage = getattr(response, "usage", None)
         tokens = {
             "in": getattr(usage, "prompt_tokens", 0) or 0,
             "out": getattr(usage, "completion_tokens", 0) or 0,
         }
+        reasoning = getattr(msg, "reasoning_content", None) or ""
+        if reasoning:                          # carry reasoning out-of-band (recorded, never fed back)
+            tokens["reasoning"] = reasoning
         return text, tokens
 
     def _complete_bedrock_usage(
@@ -90,9 +94,13 @@ class LLMClient:
             body["temperature"] = temperature
         resp = self._bedrock().invoke_model(modelId=model, body=json.dumps(body))
         parsed = json.loads(resp["body"].read())
-        text = parsed["content"][0]["text"]
+        blocks = parsed.get("content", [])
+        text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
         usage = parsed.get("usage", {})
         tokens = {"in": usage.get("input_tokens", 0), "out": usage.get("output_tokens", 0)}
+        reasoning = "".join(b.get("thinking", "") for b in blocks if b.get("type") == "thinking")
+        if reasoning:                          # carry reasoning out-of-band (recorded, never fed back)
+            tokens["reasoning"] = reasoning
         return text, tokens
 
     def _complete_openai(self, model: str, messages: list[dict], max_tokens: int) -> str:
