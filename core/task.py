@@ -1652,7 +1652,10 @@ Return {{"placeholders": []}} if all values are realistic."""
 
 Valid sources: (1) goal text, (2) preceding step returns in same sub-agent, (3) same-scene platform returns, (4) previous scene returns.
 The plan's "consumes" shows what values this platform should be using — treat those as the intended source.
-Skip domain constants, enums, and generic terms.
+
+EXACT-VALUE rule — do NOT let the agent guess arbitrary values:
+- If a param is an EXACT ARBITRARY token that the agent must reproduce character-for-character — a specific enum value (e.g. 'warm_tone', 'Open - Ready for Outreach', 'full vehicle history'), an exact title/tag/subject string, a specific hex color, a specific code, or a specific stored format (e.g. '08:00 AM') — and that exact token does NOT appear VERBATIM in the goal and is NOT returned by a prior read step, classify it as "missing". The agent could not know such a value, so it must be stated in the goal.
+- Only skip truly universal constants the agent is expected to know without being told (e.g. HTTP 200, a currency code like 'USD', the literal boolean true/false, the number of items the goal already names). When in doubt, treat an exact arbitrary token as "missing" rather than skipping it.
 
 Goal: {goal}{plan_ctx}{outcome_ctx}
 
@@ -1693,8 +1696,8 @@ Return {{"mismatches": [], "missing": []}} if all params are correct."""
 
 For each issue above, choose whichever fix makes the most sense in context:
   (A) Correct the ops param value to match what the goal or a prior step's returns actually says
-  (B) Insert a new step earlier in the sub-agent to produce the needed value (use this when the value is data-derived, e.g. an ID from a search)
-  (C) Add the value to the goal text (use this when the value represents the user's explicit intent, e.g. a target city, product name, budget)
+  (B) Insert a new step earlier in the sub-agent to produce the needed value (use this when the value is data-derived and discoverable at runtime, e.g. an ID from a search/list)
+  (C) Add the value to the goal text — use this for the user's explicit intent (target city, product name, budget) AND for any EXACT ARBITRARY token the agent must reproduce but cannot discover (a specific enum value, exact title/tag/subject string, hex color, code, or stored format). State the exact token verbatim in the goal so the agent never has to guess it.
 You may use different fixes for different params. You may also change both goal and ops if needed.
 
 Goal: {goal}{plan_ctx}{outcome_ctx}
@@ -2053,10 +2056,13 @@ def run(args: PipelineConfig) -> None:
                 patterns=patterns,
             )
             if not vresult.get("pass", False):
+                # Escape '<' so loguru's color parser doesn't treat LLM reason text
+                # like "<integer>" as a color tag.
+                _vreason = str(vresult.get("reason", "")).replace("<", r"\<")
                 if not vresult.get("transitions_ok", True):
-                    logger.opt(colors=True).info(f"<red>[Phase 2] transitions warning (keeping task): {vresult.get('reason', '')}</red>")
+                    logger.opt(colors=True).info(f"<red>[Phase 2] transitions warning (keeping task): {_vreason}</red>")
                 else:
-                    logger.opt(colors=True).info(f"<red>[Phase 2] discard: {vresult.get('reason', '')}</red>")
+                    logger.opt(colors=True).info(f"<red>[Phase 2] discard: {_vreason}</red>")
                     continue
 
             # ── Step 4: Embedding dedup ───────────────────────────────────────

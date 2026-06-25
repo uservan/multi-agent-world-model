@@ -54,8 +54,9 @@ class PipelineConfig:
     distractor_low: int = 3            # supporting tables (users, settings)
 
     # ── Fix pipeline ───────────────────────────────────────────────────────────
-    agent_run_iterations_multiplier: int = 3  # max_iterations = len(sub_ops) * this
-    fix_batch_size: int = 4
+    agent_run_iterations_multiplier: int = 7  # max_iterations = len(sub_ops) * this
+                                              # (action-only solving needs ~3 turns/step: discover + call + confirm)
+    fix_batch_size: int = 8
     fix_concurrency: int = 8           # parallel workers for env_fix server revision
 
     def __post_init__(self) -> None:

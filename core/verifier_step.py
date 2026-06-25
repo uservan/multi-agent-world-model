@@ -69,6 +69,8 @@ Rules:
 - The X-Task-ID header is automatically injected into every api_call — you do NOT need to include it; ignore any mention of it in the OpenAPI spec
 - FIRST CALL: always start with GET /openapi.json to discover all available endpoints, their exact paths, and required parameters — never guess paths
 - The task operations list only the high-level action names as a reference outline — follow their order, but you MUST discover every concrete value (IDs, SKUs, parameters) yourself via the API (search/list/detail endpoints); exact param values are NOT provided
+- Use the EXACT specific values stated in the goal — do not generalize or substitute (if the goal says 'golden retriever', send 'golden retriever', not 'dog'; if it gives an exact title/email/amount, use it verbatim)
+- NEVER invent or fabricate an ID, code, or value. Every value must come either from the goal or from a prior API response. If you need an ID, discover it via a search/list/get call — do not make one up
 - params: query string parameters (for GET/DELETE); body: JSON request body (for POST/PUT/PATCH)
 - After a create (POST) call, use the returned id to GET the created resource and confirm its full identifier before using it in subsequent path calls
 - When all steps are done, signal completion with a <done> block (no tool_call tags inside):
@@ -308,8 +310,11 @@ Is there a server-side bug causing this endpoint to return empty or wrong data e
 VERIFIER_STAGE1_SYSTEM = """You are doing an initial triage of why a task verifier returned False.
 
 Given the verifier function, its failure, the agent trajectory, task_operations spec, schema, and available API endpoints:
+This verifier is PER-PLATFORM: verify_fn checks ONLY this platform's own database; it cannot see other platforms/legs. Never explain the failure as "the agent didn't do another platform/leg" — that is out of scope for this verifier.
+
 1. root_cause:
-   - "verifier": the verifier code itself has a bug (wrong column name, wrong comparison value, wrong logic) — the agent did correct things but verifier checks incorrectly
+   - "verifier": the verifier code itself has a bug (wrong column name, wrong comparison value, wrong logic) — the agent did correct things but verifier checks incorrectly. In particular, if the agent trajectory shows it performed the required operations correctly (correct values written, correct endpoints called) yet the verifier still returned False, that points to a verifier-code bug.
+     Also "verifier" if the verify_fn is TOO STRICT — it focuses on incidental state instead of the ESSENTIAL OUTCOME: e.g. it requires an exact total row count, requires an id to resolve to exactly one row, or fails on harmless extra/duplicate/incomplete rows — even though the trajectory shows the required correct end state WAS achieved (the right order/booking/record exists with correct values). Harmless extras that do not contradict the outcome should NOT fail verification; a verify_fn that fails on them is a verifier defect, not an agent error.
    - "investigate": not clearly a verifier code bug; need to inspect DB state and server code to determine if it's a data/env/agent/outcome problem
 2. failure_summary: what went wrong — reference specific columns, status values, line numbers
 3. If root_cause == "investigate":
@@ -353,17 +358,49 @@ VERIFIER_STAGE2_SYSTEM = """You are determining the root cause of a task failure
 
 Given the failure analysis, task_operations spec, expected outcome, initial DB state (before agent ran), final DB state (after agent ran), and relevant server endpoint code:
 
+SCOPE — this is a PER-PLATFORM verifier: the verify_fn checks ONLY this platform's own database and cannot see or depend on any other platform/leg. NEVER attribute this platform's verifier failure to "another leg" or a step performed on a different platform — if you cannot find a data/env/task defect on THIS platform, do NOT invent an "agent failed another platform" explanation.
+
 Determine root_cause:
 - "data": required seed data is missing or wrong in the initial DB — the agent couldn't complete because data it needed wasn't there
 - "env": the server endpoint implementation is wrong — it returns incorrect values or has missing logic compared to the task_operations spec
-- "task": the task definition itself is the problem — goal lacks context the agent needs, expected outcome is wrong or impossible, or task_ops have incorrect values/steps; not fixable by data or env changes alone
-- "agent": NONE of the above — the seed data, the endpoints, AND the task definition are ALL correct, and the task IS solvable as-is. The verifier failed purely because the agent (solver) did not perform the required steps successfully: it skipped a needed write, gave up early, or used a value it invented instead of one it should have discovered via the API. This is NOT a defect to fix — the agent should simply try again.
+- "task": the task definition itself is the problem — not fixable by data or env changes alone. Concretely, ANY of these task_op / goal / expected_outcome defects:
+    task_operations:
+      • wrong concrete values (wrong IDs, amounts, field values)
+      • wrong or missing expected return values vs what the server actually returns
+      • field names that do not exist in the schema/API
+      • wrong step order (e.g. a value is used before the step that creates it)
+      • Type B — two different sub-agents' WRITE actions return the SAME resource identifier (same ID/token/URL): they cannot both create the same resource
+      • cross-sub-agent creation dependency (Rule C/Rule 5) — a sub-agent uses as a param a value that another sub-agent's WRITE action only produces at runtime
+      • two sub-agents performing the identical redundant operation with no distinct purpose
+    goal:
+      • the goal omits context the agent genuinely cannot discover at runtime
+    expected_outcome:
+      • it checks the wrong thing / wrong field names, or is impossible to achieve
+      • goal↔outcome inconsistency: the outcome REQUIRES a specific value, choice, or selection criterion that the goal does NOT state — e.g. the goal asks for "a tile saw under $120" (any qualifying one) but the outcome requires the SINGLE "best-rated" one; the goal says "book an appointment" but the outcome requires a specific time slot the goal never named. When several options satisfy the goal and the agent picked a valid one, but the outcome demanded a different specific one based on a rule (best-rated, cheapest, nearest, a particular slot/value) that the goal never stated, that is a goal↔outcome inconsistency — a "task" defect, NOT "agent". (Fix: state the selection rule/value in the goal, or relax the outcome.)
+- "verifier": the FINAL DB state shows the required outcome WAS actually achieved (the correct rows exist with the correct values per the goal/expected_outcome) yet verify_fn still returned False — so the verify_fn itself is buggy or over-strict (wrong column/value/comparison, requires an exact row count, or fails on harmless extra/duplicate rows). Check this BEFORE concluding "agent": if the final DB already satisfies what the task required, the agent did NOT fail — the verifier did. This is a fixable verifier defect, NOT "agent".
+- "agent": NONE of the above — the seed data, the endpoints, the task definition, AND the verifier are ALL correct, and the required outcome is NOT present in the final DB. The verifier failed purely because the agent (solver) did not perform the required steps successfully: it skipped a needed write, gave up early, or used a value it invented instead of one it should have discovered via the API. This is NOT a defect to fix — the agent should simply try again. Do NOT pick "agent" if the final DB already shows the required outcome was achieved (that is "verifier").
 
 CRITICAL rule for "agent": only choose it when you can POSITIVELY confirm all three are fine:
   1. the initial DB already contained every row the task needed (so NOT "data"), AND
   2. the relevant endpoint code is correct (so NOT "env"), AND
-  3. the goal/expected_outcome/task_ops are all correct and achievable (so NOT "task").
-If you are unsure whether data, env, or task is at fault, do NOT pick "agent" — pick the actual defect instead. "agent" means "everything is correct, the solver just didn't do it."
+  3. the goal, expected_outcome, AND task_operations are all correct, achievable, AND mutually CONSISTENT — including that you have checked the task_operations for ALL the "task" defects listed above (wrong values, wrong/missing returns, bad field names, wrong order, Type B duplicate WRITE returns, cross-sub-agent creation dependencies, redundant duplicate operations) and found NONE, AND that the expected_outcome requires nothing the goal fails to state (no goal↔outcome inconsistency: if the agent picked a valid option that satisfies the goal but the outcome demanded a different specific one based on an unstated rule, that is "task", NOT "agent") (so NOT "task").
+Note the boundary: a bad value that is baked into the task_operations spec is a "task" defect; a value the agent itself invented at runtime that is NOT in the spec is "agent". If you are unsure whether data, env, or task is at fault, do NOT pick "agent" — pick the actual defect instead. "agent" means "everything is correct, the solver just didn't do it."
+
+"agent" is the LAST RESORT — choose it ONLY after you have actively ruled out data, env, AND task. A capable solver failing is strong evidence the task is missing something it could not know or discover (most often a user-intent value that lives in params but is absent from the goal — that is a "task"/goal defect, NOT "agent"). Default to the actual defect; reserve "agent" for cases where the goal already stated everything needed and the relevant data/endpoints are confirmed correct, yet the solver still made a clear avoidable mistake.
+
+DECISIVE SIGNAL — approximate vs exact values:
+- If the agent submitted a SEMANTIC / APPROXIMATE value (e.g. 'warm orange', 'warm', '09:00', '08:00-10:00', 'full', a plausible guessed hex) OR a REWORDED / REORDERED / REFORMATTED version of the required string (e.g. 'Invitation: Guest Lecturer for Q3 2025 Cardiology CE Training' for the required 'Q3 2025 Cardiology CE Training Invitation'; 'Q3 2025, Cardiology, CE' for the required 'Q3 2025 cardiology continuing-education training package') while the verifier requires an EXACT ARBITRARY token (a specific hex like #C44B12, a specific enum, a specific exact title/tag string, a specific stored format like '08:00 AM', a specific id/code), AND that exact value is NOT written verbatim in the goal AND cannot be discovered via a query endpoint — then this is a "task"/goal defect (the exact value must be stated in the goal), NOT "agent". An agent that produced a DIFFERENT-but-equivalent phrasing is strong evidence the exact string was never given to it — a capable solver copies an exact string it was actually given; it only rephrases when it had to compose the value itself.
+- "agent" applies only when the goal stated the exact required values verbatim (or they are cleanly discoverable) and the agent still failed to use them — e.g. it skipped a required step entirely, or used a value that contradicts one explicitly given in the goal.
+
+Two loopholes you MUST NOT fall into when deciding the value was "available":
+  1. A goal that DESCRIBES a concept in natural language (e.g. "run a vehicle history report", "use a warm tone") does NOT provide the exact token. The exact arbitrary string (e.g. 'full vehicle history', 'warm_tone', '#E8702A') counts as "provided" ONLY if it appears CHARACTER-FOR-CHARACTER in the goal text. A close paraphrase is NOT provided → treat the value as missing → "task"/goal defect.
+  2. A value appearing in task_operations / the spec / the "ground truth" is NOT something the agent can see and is NOT "discoverable". NEVER cite task_operations as evidence the value was available to the agent. To call a value "discoverable" you must name the SPECIFIC read endpoint (list/get/search) that RETURNS that exact value without the agent already knowing it; if you cannot name such an endpoint, the value is NOT discoverable → "task"/goal defect.
+
+When (and only when) you choose "agent", the failure_summary MUST, for EACH exact value the agent got wrong, PROVE the value was available to it by EITHER:
+  • QUOTING the substring of the GOAL text that contains that exact value CHARACTER-FOR-CHARACTER (copy the goal's own words; if your quote does not literally contain the exact required token, you have NOT proven it — classify as "task" instead), OR
+  • NAMING the specific read endpoint (list/get/search) whose response returns that exact value as the SINGLE/unambiguous answer (not one of several options the user must choose among).
+COMPLETE-TOKEN rule: the quoted goal text must contain the ENTIRE required token character-for-character — including any prefix, suffix, casing, separators, and punctuation. A PARTIAL OVERLAP does NOT count: e.g. the goal saying "the lead is ready for outreach" does NOT contain the required enum 'Open - Ready for Outreach' (the 'Open - ' prefix and exact casing are absent), and "April 1" does NOT contain the required deadline value if the goal frames it as "before April 1" (which is ambiguous). If the goal only contains a substring, a paraphrase, or a differently-cased/formatted version of the required token, it is NOT verbatim → "task"/goal defect. Do not claim a value "appears verbatim" unless your quote, copied exactly, includes the complete token.
+Do NOT assert "the goal states it verbatim" without quoting the goal. Do NOT cite task_operations, expected_outcome, or "what the verifier checks" as proof of availability — those are not visible to the agent. If you cannot produce a verbatim goal quote (full token) or name a returning endpoint for a value, that value is a "task"/goal defect, not "agent". Also confirm data, env, and task were each checked and found fine.
 
 Then produce suggestions only for data and env paths, each in [Why]+[Fix] format:
 - "data": what seed data is missing or wrong and how to fix it
@@ -375,7 +412,7 @@ Leave lists empty for paths that are not the root cause ("task" and "agent" prod
 
 CRITICAL — Output format: single valid JSON object only
 {
-  "root_cause": "data" | "env" | "task" | "agent",
+  "root_cause": "data" | "env" | "task" | "agent" | "verifier",
   "data_suggestions": [],
   "env_suggestions": [],
   "failure_summary": "refined explanation..."
@@ -465,7 +502,10 @@ Verifier function:
 Agent trajectory:
 {trajectory_summary}
 
-What is wrong with the verifier code and how should it be fixed?"""
+Actual database state (initial = before agent, final = after agent; the required outcome should be present in final):
+{db_state}
+
+What is wrong with the verifier code and how should it be fixed? Reference the actual final DB state above — the verify_fn must return True for this state when the required outcome is present."""
 
 
 
@@ -1236,6 +1276,7 @@ def _analyze_verifier_failure(
                 expected_outcome=expected_outcome,
                 verify_fn=verify_fn,
                 trajectory_summary=trajectory_summary,
+                db_state="(DB not inspected at triage — infer the correct expected state from the trajectory and expected_outcome)",
             )
             raw = client.complete(model, [
                 {"role": "system", "content": ANALYZE_VERIFIER_FIX_SYSTEM},
@@ -1286,7 +1327,29 @@ def _analyze_verifier_failure(
         if root_cause2 == "agent":
             # data + env + task are all confirmed correct; the solver just didn't
             # do it. Not a defect — skip this round, let the agent try again later.
-            return {**empty, "_skip": True}
+            return {**empty, "_skip": True, "_reason": refined_summary}
+        if root_cause2 == "verifier":
+            # The DB confirms the required outcome was actually achieved (correct
+            # state present) yet verify_fn still returned False → the verifier code
+            # is buggy. Stage 1 couldn't conclude this without the DB; now we can.
+            logger.info(f"[{task_id}::{platform}] verifier Stage 2 → verifier bug (outcome achieved but verify_fn False)")
+            try:
+                fix_user = ANALYZE_VERIFIER_FIX_USER.format(
+                    failure_summary=refined_summary,
+                    expected_outcome=expected_outcome,
+                    verify_fn=verify_fn,
+                    trajectory_summary=trajectory_summary,
+                    db_state=f"Initial DB:\n{initial_db_data}\n\nFinal DB:\n{final_db_data}",
+                )
+                raw3 = client.complete(model, [
+                    {"role": "system", "content": ANALYZE_VERIFIER_FIX_SYSTEM},
+                    {"role": "user", "content": fix_user},
+                ], max_completion_tokens)
+                vfix = _robust_json_loads(raw3)
+                return {**empty, "verifier": vfix.get("verifier_suggestions", [])}
+            except Exception as e:
+                logger.warning(f"_analyze_verifier_failure stage2 verifier-fix failed: {e}")
+                return empty
 
         # ── task path → Stage 3: goal / outcome / task_op suggestions ────────
         logger.info(f"[{task_id}::{platform}] verifier Stage 3: task definition fix")
@@ -1686,7 +1749,13 @@ def process_task(
                             # Data + env + task all confirmed fine — the solver just
                             # didn't complete it. Not a defect: skip this round with NO
                             # suggestions; the task stays pending and is retried later.
-                            logger.info(f"[{task_id}::{platform}] agent fault (task is solvable) — skipping this round")
+                            # Escape '<' so loguru's color parser doesn't treat LLM text
+                            # like "<integer>" as a color tag.
+                            _reason = str(vsug.get("_reason", "(no reason given)")).replace("<", r"\<")
+                            logger.opt(colors=True).info(
+                                f"<yellow>[{task_id}::{platform}] agent fault (data/env/task all OK) — skipping. "
+                                f"Why: {_reason}</yellow>"
+                            )
                             return {"task_id": task_id, "status": "skipped", "suggestions": {}}
                         for k in ["verifier", "env", "data", "task_op", "goal_supplement", "outcome"]:
                             platform_suggestions[k].extend(vsug.get(k, []))

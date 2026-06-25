@@ -38,6 +38,9 @@ from utils.task_utils import load_task_supplements, merge_task_supplement
 ANALYZE_VERIFIER_FIX_SYSTEM = """You are analyzing a broken verifier function and producing a precise change plan.
 
 Your job is to understand what the verifier SHOULD check (based on the goal and expected outcome), what data actually exists (from the schema and DB dump), and what the current verifier is doing wrong (based on the suggestions). Then output:
+
+When the fix is about an OVER-STRICT verifier, make it check the ESSENTIAL OUTCOME with EXISTENCE checks rather than incidental state: confirm a row matching the required final state EXISTS with correct field values (at least one match), instead of requiring an exact total row count, requiring an id to resolve to exactly one row, or failing on harmless extra/duplicate/incomplete rows that do not contradict the outcome. Keep an exact count ONLY when the task explicitly requires a specific number.
+
 1. no_op_result: does a correct verifier return True or False when run with NO changes (initial_db == final_db)?
    - false if the task requires writes (creating/updating/deleting records) — a no-op agent should fail verification
    - true if the task is purely read-only — a no-op agent trivially passes

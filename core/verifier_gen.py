@@ -39,6 +39,9 @@ Requirements:
 9. Use try/except around all DB operations — never raise exceptions, return False on error
 10. Be strict: if the write references the wrong record (wrong price, wrong rating, wrong category, etc.), return False
 11. NEVER use system-generated return values from write operations (e.g. auto-generated order_id, record_id, confirmation codes) to locate rows — these are unknown at verification time. Instead verify using known business field values visible in the seed data (e.g. product_id, user_id, quantity, price, status)
+12. Check the ESSENTIAL OUTCOME with EXISTENCE checks, not incidental state. Confirm that a row matching the required final state EXISTS with the correct field values (i.e. at least one matching row: SELECT ... WHERE <required business criteria>). Do NOT require an exact total row count, and do NOT require that an id resolves to exactly one row.
+13. Be ROBUST to harmless extras: do NOT return False merely because the agent left extra, duplicate, or incomplete rows that do not contradict the required outcome (e.g. an uncommitted duplicate, an extra cart). Judge whether the required correct end state was achieved — not whether the table is pristine.
+14. Enforce an exact count ONLY when the task explicitly requires a specific number (e.g. "create exactly 3 X", "shortlist 3 distinct candidates"). Otherwise verify that each required item exists, ignoring harmless extras.
 
 Output format (valid JSON, no markdown fences):
 {
