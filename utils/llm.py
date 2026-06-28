@@ -10,16 +10,47 @@ class LLMClient:
         api_key: str | None = None,
         base_url: str | None = None,
         aws_region: str = "us-east-1",
+        llm_params: dict | None = None,
+        min_completion_tokens: int | None = None,
     ):
+        # Secrets/endpoint — keep these in env (export.sh). Each falls back to its env var when None.
         self._api_key = api_key
         self._base_url = base_url
         self._aws_region = aws_region
         self._openai_client = None
         self._bedrock_client = None
+        # All LLM tuning lives in this one passthrough dict, merged verbatim into the OpenAI call.
+        # It carries sampling params (temperature, top_p, ...) AND any model-specific extras, e.g.
+        # per-model thinking control via extra_body.chat_template_kwargs:
+        #   Kimi-K2.6 instant: {"extra_body": {"chat_template_kwargs": {"thinking": false}}}
+        #   GLM-5.2 no-think:  {"extra_body": {"chat_template_kwargs": {"enable_thinking": false}}}
+        # Add/replace anything via config — no code change needed.
+        self._llm_params = dict(llm_params or {})
+        # The only knob that can't be a passthrough param (it's max() logic, not an API field):
+        # an optional floor on max_completion_tokens so a small per-call cap doesn't get eaten by
+        # the model's reasoning → empty content. None = no floor.
+        self._min_completion_tokens = int(min_completion_tokens) if min_completion_tokens is not None else None
+
+    @classmethod
+    def from_config(cls, cfg, api_key: str | None = None, base_url: str | None = None) -> "LLMClient":
+        """Build from a config object (PipelineConfig / EvalConfig). LLM tuning flows from cfg;
+        api_key/base_url may be overridden (eval passes per-role orch_/sub_ values)."""
+        return cls(
+            api_key=api_key if api_key is not None else getattr(cfg, "api_key", None),
+            base_url=base_url if base_url is not None else getattr(cfg, "base_url", None),
+            aws_region=getattr(cfg, "aws_region", "us-east-1"),
+            llm_params=getattr(cfg, "llm_params", None),
+            min_completion_tokens=getattr(cfg, "min_completion_tokens", None),
+        )
 
     @staticmethod
     def _is_bedrock(model: str) -> bool:
         return model.startswith(("us.anthropic.", "eu.anthropic.", "ap.anthropic.", "anthropic."))
+
+    def _floor_max_tokens(self, max_tokens: int) -> int:
+        if self._min_completion_tokens is None:
+            return max_tokens
+        return max(max_tokens, self._min_completion_tokens)
 
     def _openai(self):
         if self._openai_client is None:
@@ -57,8 +88,12 @@ class LLMClient:
     def _complete_openai_usage(
         self, model: str, messages: list[dict], max_tokens: int, temperature: float | None
     ) -> tuple[str, dict]:
-        kwargs: dict = {"model": model, "messages": messages, "max_completion_tokens": max_tokens}
-        if temperature is not None:
+        kwargs: dict = {**self._llm_params,            # config passthrough (temperature, top_p, extra_body, ...)
+                        "model": model, "messages": messages,
+                        "max_completion_tokens": self._floor_max_tokens(max_tokens)}
+        # llm_params.temperature (the more specific config) wins; else fall back to the caller's arg
+        # (e.g. eval's cfg.temperature). So setting temperature in llm_params is never silently shadowed.
+        if temperature is not None and "temperature" not in self._llm_params:
             kwargs["temperature"] = temperature
         response = self._openai().chat.completions.create(**kwargs)
         msg = response.choices[0].message
@@ -105,10 +140,9 @@ class LLMClient:
 
     def _complete_openai(self, model: str, messages: list[dict], max_tokens: int) -> str:
         response = self._openai().chat.completions.create(
-            model=model,
-            messages=messages,
-            max_completion_tokens=max_tokens,
-        )
+            **{**self._llm_params,                     # config passthrough (temperature, top_p, extra_body, ...)
+               "model": model, "messages": messages,
+               "max_completion_tokens": self._floor_max_tokens(max_tokens)})
         return response.choices[0].message.content or ""
 
     def _complete_bedrock(self, model: str, messages: list[dict], max_tokens: int) -> str:

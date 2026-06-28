@@ -84,14 +84,16 @@ def http_call(
     body: dict | None = None,
 ) -> str:
     """Make one HTTP request to a platform server with X-Task-ID injected."""
-    url = base_url.rstrip("/") + "/" + path.lstrip("/")
-    if params:
-        url += "?" + urllib.parse.urlencode(params)
-    data = json.dumps(body).encode() if body else None
-    req = urllib.request.Request(url, data=data, method=method.upper())
-    req.add_header("X-Task-ID", task_id)
-    req.add_header("Content-Type", "application/json")
     try:
+        url = base_url.rstrip("/") + "/" + path.lstrip("/")
+        if params:
+            if not isinstance(params, dict):
+                return f"Error: 'params' must be a JSON object, got {type(params).__name__}"
+            url += "?" + urllib.parse.urlencode(params)
+        data = json.dumps(body).encode() if body else None
+        req = urllib.request.Request(url, data=data, method=method.upper())
+        req.add_header("X-Task-ID", task_id)
+        req.add_header("Content-Type", "application/json")
         with urllib.request.urlopen(req, timeout=30) as resp:
             return resp.read().decode("utf-8")
     except urllib.error.HTTPError as e:

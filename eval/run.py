@@ -24,13 +24,15 @@ from utils.llm import LLMClient
 
 def _model_clients(cfg: EvalConfig) -> tuple[ModelClient, ModelClient | None]:
     orch = ModelClient(
-        client=LLMClient(api_key=cfg.orch_api_key, base_url=cfg.orch_base_url),
+        client=LLMClient(api_key=cfg.orch_api_key, base_url=cfg.orch_base_url,
+                         llm_params=cfg.orch_llm_params, min_completion_tokens=cfg.min_completion_tokens),
         model=cfg.orch_model, temperature=cfg.temperature, max_tokens=cfg.max_completion_tokens,
     )
     sub = None
     if cfg.mode == "multi":
         sub = ModelClient(
-            client=LLMClient(api_key=cfg.sub_api_key, base_url=cfg.sub_base_url),
+            client=LLMClient(api_key=cfg.sub_api_key, base_url=cfg.sub_base_url,
+                             llm_params=cfg.sub_llm_params, min_completion_tokens=cfg.min_completion_tokens),
             model=cfg.sub_model, temperature=cfg.temperature, max_tokens=cfg.max_completion_tokens,
         )
     return orch, sub
@@ -43,7 +45,8 @@ async def _run_one(cfg, task, resources, verifiers, orch, sub, run_idx) -> dict:
     else:
         traj = await multi_agent.run_task(
             task, resources, verifiers, orch, sub, seed,
-            cfg.max_turns, cfg.max_concurrent, cfg.max_queue,
+            cfg.max_turns, cfg.max_concurrent, cfg.max_queue, cfg.sub_max_turns,
+            cfg.orch_style,
         )
     traj["run_idx"] = run_idx
     return traj

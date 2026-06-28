@@ -39,9 +39,17 @@ async def run_task(
 
         system, user = build_single_agent_prompt(goal, runtime.platform_map())
         executor = make_http_executor(runtime)
-        _, tokens = await run_agent_loop(
-            "agent", system, user, orch, executor, event_log, max_turns,
-        )
+        agent_error = None
+        tokens = {"in": 0, "out": 0}
+        try:
+            _, tokens = await run_agent_loop(
+                "agent", system, user, orch, executor, event_log, max_turns,
+            )
+        except Exception as e:
+            # Agent loop crashed (e.g. context-length overflow). Don't drop the run —
+            # score whatever it managed to do against the DB and record acc + error.
+            agent_error = str(e)
+            logger.warning(f"[{task_id}] agent loop failed, scoring partial state: {e}")
 
         verifier_results, acc = score_task(runtime, verifiers, task_id)
     finally:
@@ -56,5 +64,6 @@ async def run_task(
         "events": event_log.events,
         "verifier_results": verifier_results,
         "acc": acc,
+        "error": agent_error,
         "tokens": {"orch": tokens, "sub": {"in": 0, "out": 0}},
     }

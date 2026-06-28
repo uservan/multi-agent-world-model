@@ -32,7 +32,7 @@ def run(args: PipelineConfig, task_file: str, *, platform_locks: PlatformLocks |
         logger.success("No servers need revision.")
         return
 
-    client = LLMClient(api_key=args.api_key, base_url=args.base_url, aws_region=args.aws_region)
+    client = LLMClient.from_config(args)
 
     success = failed_count = 0
     for name in pending:

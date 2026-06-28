@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -29,7 +29,9 @@ _FROZEN_FIELDS = (
     "mode", "orch_model", "orch_api_key", "orch_base_url",
     "sub_model", "sub_api_key", "sub_base_url",
     "n", "base_seed", "temperature", "max_completion_tokens",
-    "max_turns", "max_concurrent", "max_queue",
+    "orch_llm_params", "sub_llm_params", "min_completion_tokens",
+    "max_turns", "sub_max_turns", "max_concurrent", "max_queue",
+    "orch_style",
 )
 
 
@@ -62,9 +64,19 @@ class EvalConfig:
     base_seed: int = 0
     temperature: float = 1.0
     max_completion_tokens: int = 1024 * 16
-    max_turns: int = 100
+    # Per-role LLM passthrough params (temperature/top_p/extra_body...). orch and sub may be
+    # different models needing different keys, e.g. Kimi instant mode:
+    #   {"extra_body": {"chat_template_kwargs": {"thinking": False}}}
+    orch_llm_params: dict = field(default_factory=dict)
+    sub_llm_params: dict = field(default_factory=dict)
+    # Floor on max_completion_tokens so reasoning doesn't eat a small cap → empty content (None = off).
+    min_completion_tokens: int | None = None
+    max_turns: int = 100             # orchestrator / single-agent turn cap
+    sub_max_turns: int = 30          # sub-agent turn cap (multi mode only)
     max_concurrent: int = 4
     max_queue: int = 16
+    # Orchestrator delegation bias (multi mode only): neutral | delegate | solo
+    orch_style: str = "neutral"
     # runtime / editable
     task_final: str = "outputs/generated/verified/task_final.jsonl"
     platforms_input: str = "outputs/platforms.jsonl"

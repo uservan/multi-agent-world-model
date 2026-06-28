@@ -29,11 +29,11 @@ from eval.config import EvalConfig
 def main() -> None:
     parser = argparse.ArgumentParser(description="Multi-agent world model — agent eval")
     g = parser.add_mutually_exclusive_group(required=False)
-    g.add_argument("--init", metavar="TEMPLATE_YML",
+    g.add_argument("--init", metavar="TEMPLATE_YML", # default="eval/config/multi_same.yml",
                    help="Start a NEW run from a config template (default: eval/config/single.yml).")
-    g.add_argument("--config", metavar="RUN_DIR", default="outputs/eval/single__Qwen3.5-122B-A10B__single__20260622_231527/config.yml",
+    g.add_argument("--config", metavar="RUN_DIR", # default cleared so --init works for new runs
                    help="Resume an existing run folder (cached tasks are skipped).")
-    parser.add_argument("--parallel", type=int, default=1,
+    parser.add_argument("--parallel", type=int, default=4,
                         help="Number of task-runs to execute concurrently (default: 8).")
     args = parser.parse_args()
 

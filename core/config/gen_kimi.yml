@@ -1,0 +1,79 @@
+# ============================================================================
+# Data-generation config — Kimi-K2.6 (local sglang).
+# Sibling configs (same full field set, different model block): gen_glm.yml, gen_claude.yml.
+#   Run:  python main.py --mode generate --config core/config/gen_kimi.yml
+# Every key below maps 1:1 to a field in core/config.py (PipelineConfig).
+# List only what you want to change — omitted keys keep their code default.
+# Secrets (OPENAI_API_KEY) stay in env / export.sh and are NEVER put here.
+# ============================================================================
+
+# ── Models ──────────────────────────────────────────────────────────────────
+# Names must match the sglang --served-model-name exactly.
+model: Kimi-K2.6            # cheap model: validation / repair / schema / spec
+gen_model: Kimi-K2.6        # strong model: creative generation (task.py, data.py)
+base_url: http://10.209.44.54:30000/v1   # LLM endpoint; omit to use OPENAI_BASE_URL from env
+aws_region: us-east-1       # only used for Bedrock (us.anthropic.* models)
+
+# ── LLM tuning ──────────────────────────────────────────────────────────────
+# llm_params is passed verbatim to the chat-completions call: sampling params
+# (temperature, top_p, frequency_penalty, ...) AND model-specific extras via
+# extra_body.chat_template_kwargs. Different models use different keys:
+#   Kimi-K2.6 instant: {extra_body: {chat_template_kwargs: {thinking: false}}}
+#   GLM-5.2 no-think:  {extra_body: {chat_template_kwargs: {enable_thinking: false}}}
+#   sampling example:  {temperature: 1.0, top_p: 0.95}
+# Currently THINKING mode (Kimi's strength; needed for the numeric/consistency-heavy tasks).
+# Official temp for thinking = 1.0. To switch to instant: add
+#   extra_body: {chat_template_kwargs: {thinking: false}}  and set temperature: 0.6
+llm_params:
+  temperature: 1.0
+# Floor on max_completion_tokens so a small per-call cap isn't eaten by thinking →
+# empty content. Keep at 64k in thinking mode; null disables it.
+min_completion_tokens: 65536
+
+# ── Output paths ────────────────────────────────────────────────────────────
+# All *.jsonl outputs (tasks.jsonl, platforms.jsonl, ...) derive from generated_dir.
+generated_dir: outputs/eval_gen_kimi
+verified_dir: outputs/eval_gen_kimi/verified
+scenario_input: outputs/scenario_platform_eval.yml   # platform pool fed into scenario step
+
+# ── Concurrency / retries ───────────────────────────────────────────────────
+concurrency: 16             # parallel structure workers
+max_retries: 3              # per-LLM-call retries
+max_completion_tokens: 65536
+
+# ── Generation scale ────────────────────────────────────────────────────────
+budget_list: [3, 5, 7, 9, 13]   # task "budget" buckets = total sub-agents across scenes
+num_structures: 10               # distinct scene/platform structures per budget
+tasks_per_structure: 4           # accepted tasks to collect per structure
+max_task_attempts: 5             # outer passes over task generation
+max_structure_sample_attempts: 2000   # random draws to find unique structures per budget
+max_attempts_multiplier: 1       # per-structure attempt budget = need * this
+
+# ── Structure shape ─────────────────────────────────────────────────────────
+max_scenes: 4
+max_platforms_per_scene: 3
+max_agents_per_platform: 3
+min_steps_per_subagent: 5
+max_steps_per_subagent: 20
+
+# ── Validation / dedup ──────────────────────────────────────────────────────
+validity_threshold: 3       # min validity score to keep a task
+embed_threshold: 0.80       # cosine sim above which two goals are dupes
+embed_model: text-embedding-3-large   # embeddings use real OpenAI (EMBEDDING_OPENAI_BASE_URL)
+
+# ── spec.py ─────────────────────────────────────────────────────────────────
+max_results: 5              # max results an action returns in the spec
+
+# ── env.py (FastAPI server generation) ──────────────────────────────────────
+env_max_retries: 4          # retries when a generated server fails to start
+
+# ── data.py (seed DB distractors) ───────────────────────────────────────────
+num_distractors: 10         # default distractor rows per table
+distractor_high: 50         # main search tables
+distractor_medium: 10       # secondary tables
+distractor_low: 3           # supporting tables (users, settings)
+
+# ── fix pipeline ────────────────────────────────────────────────────────────
+agent_run_iterations_multiplier: 7   # max_iterations = max_steps_per_subagent * this
+fix_batch_size: 16
+fix_concurrency: 16         # parallel workers for env_fix server revision

@@ -552,7 +552,7 @@ def run(args: PipelineConfig) -> None:
         logger.success("All task×platform verifiers already generated.")
         return
 
-    client = LLMClient(api_key=args.api_key, base_url=args.base_url, aws_region=args.aws_region)
+    client = LLMClient.from_config(args)
 
     success = failed = 0
 

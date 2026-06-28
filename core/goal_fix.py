@@ -392,7 +392,7 @@ def run(args: PipelineConfig, batch_file: str, *, lock: threading.Lock | None = 
     tasks = load_tasks(args.tasks_output)
     schemas = load_schemas(args.schemas_output)
     envs = load_envs(args.envs_output)
-    client = LLMClient(api_key=args.api_key, base_url=args.base_url, aws_region=args.aws_region)
+    client = LLMClient.from_config(args)
 
     # Read existing supplements outside the lock (LLM calls happen here)
     existing_supplements = load_task_supplements(args.task_supplements_output)

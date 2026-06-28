@@ -1845,7 +1845,7 @@ def process_batch(
     def _client() -> LLMClient:
         c = getattr(_local, "client", None)
         if c is None:
-            c = LLMClient(api_key=args.api_key, base_url=args.base_url, aws_region=args.aws_region)
+            c = LLMClient.from_config(args)
             _local.client = c
         return c
 

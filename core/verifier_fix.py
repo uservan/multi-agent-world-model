@@ -287,7 +287,7 @@ def run(args: PipelineConfig, batch_file: str, *, lock: threading.Lock | None = 
 
     schemas = load_schemas(args.schemas_output)
 
-    client = LLMClient(api_key=args.api_key, base_url=args.base_url, aws_region=args.aws_region)
+    client = LLMClient.from_config(args)
 
     work_items: list[tuple] = []
     for task_id, platform_map in verifier_suggestions.items():

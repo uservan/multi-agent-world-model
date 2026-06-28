@@ -1,0 +1,38 @@
+# Multi-agent eval — orchestrator + sub-agents, SAME model.
+# orch: Kimi-K2.6   sub: Kimi-K2.6
+mode: multi
+
+orch_model: Kimi-K2.6
+orch_api_key: EMPTY
+orch_base_url: http://127.0.0.1:30000/v1
+orch_input_cost: 6.6e-07     # $0.66 / 1M tokens
+orch_output_cost: 3.41e-06   # $3.41 / 1M tokens
+# Kimi thinking mode (its strength). Official thinking temp = 1.0.
+# For instant mode add: extra_body: {chat_template_kwargs: {thinking: false}} and temperature: 0.6
+orch_llm_params:
+  temperature: 1.0
+
+sub_model: Kimi-K2.6
+sub_api_key: EMPTY
+sub_base_url: http://127.0.0.1:30000/v1
+sub_input_cost: null
+sub_output_cost: null
+sub_llm_params:
+  temperature: 1.0
+
+n: 5
+base_seed: 42
+temperature: 1.0
+max_completion_tokens: 16384
+min_completion_tokens: 65536
+max_turns: 200      # episode ends ONLY on model's <done> or hitting this cap
+sub_max_turns: 200
+max_concurrent: 4
+max_queue: 16
+
+# Data sources
+task_final: outputs/generated_new/verified/task_final.jsonl
+platforms_input: outputs/platforms.jsonl
+envs_input: outputs/generated_new/envs_fixed.jsonl
+databases_dir: outputs/generated_new/databases
+eval_root: outputs/eval/generated_new_200

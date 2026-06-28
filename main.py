@@ -88,25 +88,25 @@ def run_generate(args: PipelineConfig) -> None:
     logger.info("=== Step 1/7: Scenario ===")
     scenario_step.run(args)
 
-    # logger.info("=== Step 2/7: Task ===")
-    # for attempt in range(1, args.max_task_attempts + 1):
-    #     logger.info(f"Task generation attempt {attempt}/{args.max_task_attempts}")
-    #     task_step.run(args)
+    logger.info("=== Step 2/7: Task ===")
+    for attempt in range(1, args.max_task_attempts + 1):
+        logger.info(f"Task generation attempt {attempt}/{args.max_task_attempts}")
+        task_step.run(args)
 
-    logger.info("=== Step 3/7: Schema ===")
-    schema_step.run(args)
+    # logger.info("=== Step 3/7: Schema ===")
+    # schema_step.run(args)
 
-    logger.info("=== Step 4/7: Spec ===")
-    spec_step.run(args)
+    # logger.info("=== Step 4/7: Spec ===")
+    # spec_step.run(args)
 
-    logger.info("=== Step 5/7: Env (FastAPI servers) [generate] ===")
-    env_generate_step.run(args)
+    # logger.info("=== Step 5/7: Env (FastAPI servers) [generate] ===")
+    # env_generate_step.run(args)
 
-    logger.info("=== Step 6/7: Data (seed DBs) ===")
-    data_step.run(args)
+    # logger.info("=== Step 6/7: Data (seed DBs) ===")
+    # data_step.run(args)
 
-    logger.info("=== Step 6.5/7: Verifier Gen (generate + sanity check) ===")
-    verifier_gen_step.run(args)
+    # logger.info("=== Step 6.5/7: Verifier Gen (generate + sanity check) ===")
+    # verifier_gen_step.run(args)
 
     logger.success("Generate pipeline complete.")
 
@@ -232,77 +232,19 @@ def run_fix(args: PipelineConfig) -> None:
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    defaults = PipelineConfig()
     parser = argparse.ArgumentParser(description="Multi-agent world model data generation pipeline")
 
     parser.add_argument("--mode", type=str, default="fix", choices=["generate", "fix", "debug", "finalize"],
                         help="Pipeline mode: 'generate' for data generation, 'fix' for revision, "
                              "'debug' for sequential fix, 'finalize' to consolidate verified tasks into task_final.jsonl")
-
-    # Paths
-    parser.add_argument("--scenario_input", type=str, default=defaults.scenario_input)
-    parser.add_argument("--scenario_output", type=str, default=defaults.scenario_output)
-    parser.add_argument("--tasks_output", type=str, default=defaults.tasks_output)
-    parser.add_argument("--schemas_output", type=str, default=defaults.schemas_output)
-    parser.add_argument("--specs_output", type=str, default=defaults.specs_output)
-    parser.add_argument("--envs_output", type=str, default=defaults.envs_output)
-    parser.add_argument("--servers_dir", type=str, default=defaults.servers_dir)
-    parser.add_argument("--data_manifest", type=str, default=defaults.data_manifest)
-    parser.add_argument("--databases_dir", type=str, default=defaults.databases_dir)
-    parser.add_argument("--verifiers_output", type=str, default=defaults.verifiers_output)
-
-    # LLM (set via export.sh; CLI overrides for one-off runs)
-    parser.add_argument("--model", type=str, default=defaults.model)
-    parser.add_argument("--gen_model", type=str, default=defaults.gen_model)
-    parser.add_argument("--api_key", type=str, default=defaults.api_key)
-    parser.add_argument("--base_url", type=str, default=defaults.base_url)
-    parser.add_argument("--aws_region", type=str, default=defaults.aws_region)
-    parser.add_argument("--concurrency", type=int, default=defaults.concurrency)
-    parser.add_argument("--max_retries", type=int, default=defaults.max_retries)
-
-    # task.py
-    parser.add_argument("--embed_model", type=str, default=defaults.embed_model)
-    parser.add_argument("--embed_api_key", type=str, default=defaults.embed_api_key)
-    parser.add_argument("--budget_list", type=int, nargs="+", default=defaults.budget_list)
-    parser.add_argument("--num_structures", type=int, default=defaults.num_structures)
-    parser.add_argument("--tasks_per_structure", type=int, default=defaults.tasks_per_structure)
-    parser.add_argument("--max_scenes", type=int, default=defaults.max_scenes)
-    parser.add_argument("--max_platforms_per_scene", type=int, default=defaults.max_platforms_per_scene)
-    parser.add_argument("--max_agents_per_platform", type=int, default=defaults.max_agents_per_platform)
-
-    parser.add_argument("--embed_threshold", type=float, default=defaults.embed_threshold)
-    parser.add_argument("--validity_threshold", type=int, default=defaults.validity_threshold)
-    parser.add_argument("--min_steps_per_subagent", type=int, default=defaults.min_steps_per_subagent)
-    parser.add_argument("--max_steps_per_subagent", type=int, default=defaults.max_steps_per_subagent)
-    parser.add_argument("--max_attempts_multiplier", type=int, default=defaults.max_attempts_multiplier)
-    parser.add_argument("--max_completion_tokens", type=int, default=defaults.max_completion_tokens)
-
-    # spec.py
-    parser.add_argument("--max_results", type=int, default=defaults.max_results)
-
-    # env.py
-    parser.add_argument("--env_max_retries", type=int, default=defaults.env_max_retries)
-
-    # data.py
-    parser.add_argument("--num_distractors", type=int, default=defaults.num_distractors)
-    parser.add_argument("--distractor_high", type=int, default=defaults.distractor_high)
-    parser.add_argument("--distractor_medium", type=int, default=defaults.distractor_medium)
-    parser.add_argument("--distractor_low", type=int, default=defaults.distractor_low)
-    parser.add_argument("--data_records", type=str, default=defaults.data_records)
-    parser.add_argument("--task_goals_output", type=str, default=defaults.task_goals_output)
-
-    # fix pipeline
-    parser.add_argument("--fix_batch_size", type=int, default=defaults.fix_batch_size)
-    parser.add_argument("--fix_concurrency", type=int, default=defaults.fix_concurrency)
+    parser.add_argument("--config", type=str, default=None,
+                        help="Path to a yml config. When set, all settings are read from it "
+                             "(defaults fill the rest); CLI flags other than --mode are ignored.")
 
     parsed = parser.parse_args()
 
-    cfg = PipelineConfig()
-    for k, v in vars(parsed).items():
-        if k == "mode":
-            continue
-        if hasattr(cfg, k) and v is not None:
-            setattr(cfg, k, v)
+    # Everything tunable lives in the yml (or PipelineConfig defaults). Edit the yml, not the CLI.
+    cfg = PipelineConfig.from_yaml(parsed.config) if parsed.config else PipelineConfig()
 
     if parsed.mode == "generate":
         run_generate(cfg)

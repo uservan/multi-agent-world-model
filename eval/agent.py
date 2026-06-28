@@ -17,6 +17,17 @@ from utils.agent_io import parse_tool_calls_detailed
 from utils.llm import LLMClient
 
 
+# Nudge when a turn produced neither a tool call nor <done> (e.g. a thinking model
+# spent the whole turn reasoning and emitted empty content). The episode must NOT end
+# here — only the model may declare completion via <done>.
+_CONTINUE_OR_DONE = (
+    "You did not call any tool, and you did not output <done>. The task is not over until "
+    "YOU declare it complete. If every part of the task is fully done and verified, reply with:\n"
+    "<done>\n<brief summary>\n</done>\n"
+    "Otherwise, continue working now — issue the next <tool_call> (http) to make progress."
+)
+
+
 def _format_parse_errors(errors: list[str]) -> str:
     """Feedback message handed back to the model when its tool calls don't parse."""
     return (
@@ -84,11 +95,18 @@ async def run_agent_loop(
     tool_executor,                 # async (tool_call: dict) -> str
     event_log: EventLog,
     max_turns: int,
+    final_prompt: str | None = None,
 ) -> tuple[str, dict]:
     """Run one agent until <done>, no tool calls, or max_turns.
 
     Returns (final_text, total_tokens={"in","out"}). Records system/user prompts
     and every assistant turn (with its tool calls + responses) into event_log.
+
+    If `final_prompt` is given, the loop ALWAYS ends with one extra call using
+    `final_prompt` as a user message (no tools), and its output becomes `final_text`.
+    Used for sub-agents: regardless of how the run went, the last turn is a concise
+    summary of the requested info for the orchestrator — so the orchestrator receives
+    that summary, never the full trajectory (which would blow up its context).
     """
     event_log.add(actor, system_prompt)          # role-tagged system prompt
     event_log.add(f"{actor}:user", user_prompt)
@@ -114,12 +132,15 @@ async def run_agent_loop(
 
         if not tool_calls:
             event_log.add(actor, text, tokens=usage)
-            # The model tried to call tools but every block failed to parse → tell it
-            # what broke so it can retry, instead of silently ending the episode.
-            if parse_errors and not done:
+            if done:
+                break  # only the model ends the episode — via an explicit <done>
+            # No tool call AND no <done>: do NOT end here (a thinking model may have spent
+            # the turn reasoning with empty content). Tell it what to do and keep going.
+            if parse_errors:
                 messages.append({"role": "user", "content": _format_parse_errors(parse_errors)})
-                continue
-            break
+            else:
+                messages.append({"role": "user", "content": _CONTINUE_OR_DONE})
+            continue
 
         responses: list[str] = []
         for tc in tool_calls:
@@ -136,5 +157,15 @@ async def run_agent_loop(
         if parse_errors:  # some calls ran, others were malformed — note the ignored ones
             result_text += "\n\n" + _format_parse_errors(parse_errors)
         messages.append({"role": "user", "content": result_text})
+
+    # Always end with a dedicated summary turn (no tools) when requested, so the
+    # caller (orchestrator) gets a concise result, never the full trajectory.
+    if final_prompt:
+        messages.append({"role": "user", "content": final_prompt})
+        text, usage = await model.complete(messages)
+        final_text = text
+        total["in"] += usage.get("in", 0)
+        total["out"] += usage.get("out", 0)
+        event_log.add(actor, text, tokens=usage)
 
     return final_text, total

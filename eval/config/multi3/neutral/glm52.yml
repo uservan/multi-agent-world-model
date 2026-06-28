@@ -1,0 +1,43 @@
+# Multi-agent eval — GLM-5.2, orch_style=neutral
+mode: multi
+
+orch_model: GLM-5.2
+orch_api_key: EMPTY
+orch_base_url: http://127.0.0.1:30000/v1
+orch_input_cost: null
+orch_output_cost: null
+# GLM-5.2 thinking via reasoning_effort (sglang glm45 parser splits reasoning out).
+orch_llm_params:
+  extra_body:
+    chat_template_kwargs:
+      reasoning_effort: high
+  temperature: 1.0
+
+sub_model: GLM-5.2
+sub_api_key: EMPTY
+sub_base_url: http://127.0.0.1:30000/v1
+sub_input_cost: null
+sub_output_cost: null
+sub_llm_params:
+  extra_body:
+    chat_template_kwargs:
+      reasoning_effort: high
+  temperature: 1.0
+
+n: 5
+base_seed: 42
+temperature: 1.0
+max_completion_tokens: 16384
+min_completion_tokens: 65536
+max_turns: 200
+sub_max_turns: 200
+max_concurrent: 4
+max_queue: 16
+orch_style: neutral
+
+# Data sources
+task_final: outputs/generated_new/verified/task_final.jsonl
+platforms_input: outputs/platforms.jsonl
+envs_input: outputs/generated_new/envs_fixed.jsonl
+databases_dir: outputs/generated_new/databases
+eval_root: outputs/eval/generated_new_200_neutral

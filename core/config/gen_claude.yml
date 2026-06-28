@@ -1,0 +1,67 @@
+# ============================================================================
+# Data-generation config — Claude (AWS Bedrock).
+#   Run:  python main.py --mode generate --config core/config/gen_claude.yml
+# Uses the Bedrock path (boto3), NOT the OpenAI endpoint — needs AWS credentials in
+# the environment; base_url / OPENAI_API_KEY are ignored for us.anthropic.* models.
+# Every key maps 1:1 to a field in core/config.py (PipelineConfig).
+# ============================================================================
+
+# ── Models (the us.anthropic.* prefix routes LLMClient to Bedrock) ────────────
+model: us.anthropic.claude-opus-4-8       # cheap role; or us.anthropic.claude-sonnet-4-6
+gen_model: us.anthropic.claude-opus-4-8   # strong role: creative generation
+base_url: null              # ignored on the Bedrock path
+aws_region: us-east-1       # Bedrock region
+
+# ── LLM tuning ──────────────────────────────────────────────────────────────
+# NOTE: llm_params (chat_template_kwargs etc.) and min_completion_tokens are
+# OpenAI-path only; the Bedrock path ignores them. Claude extended thinking would
+# need a code change in utils/llm.py (_complete_bedrock), not a yml kwarg.
+llm_params: {}
+min_completion_tokens: null
+
+# ── Output paths (distinct dir so Claude data doesn't mix with other models) ──
+generated_dir: outputs/eval_gen_claude
+verified_dir: outputs/eval_gen_claude/verified
+scenario_input: outputs/scenario_platform_eval.yml   # platform pool fed into scenario step
+
+# ── Concurrency / retries ───────────────────────────────────────────────────
+concurrency: 16             # parallel structure workers
+max_retries: 3              # per-LLM-call retries
+max_completion_tokens: 65536
+
+# ── Generation scale ────────────────────────────────────────────────────────
+budget_list: [3, 5, 7, 9, 13]   # task "budget" buckets = total sub-agents across scenes
+num_structures: 10               # distinct scene/platform structures per budget
+tasks_per_structure: 4           # accepted tasks to collect per structure
+max_task_attempts: 5             # outer passes over task generation
+max_structure_sample_attempts: 2000   # random draws to find unique structures per budget
+max_attempts_multiplier: 1       # per-structure attempt budget = need * this
+
+# ── Structure shape ─────────────────────────────────────────────────────────
+max_scenes: 4
+max_platforms_per_scene: 3
+max_agents_per_platform: 3
+min_steps_per_subagent: 5
+max_steps_per_subagent: 20
+
+# ── Validation / dedup ──────────────────────────────────────────────────────
+validity_threshold: 3       # min validity score to keep a task
+embed_threshold: 0.80       # cosine sim above which two goals are dupes
+embed_model: text-embedding-3-large   # embeddings use real OpenAI (EMBEDDING_OPENAI_BASE_URL)
+
+# ── spec.py ─────────────────────────────────────────────────────────────────
+max_results: 5              # max results an action returns in the spec
+
+# ── env.py (FastAPI server generation) ──────────────────────────────────────
+env_max_retries: 4          # retries when a generated server fails to start
+
+# ── data.py (seed DB distractors) ───────────────────────────────────────────
+num_distractors: 10         # default distractor rows per table
+distractor_high: 50         # main search tables
+distractor_medium: 10       # secondary tables
+distractor_low: 3           # supporting tables (users, settings)
+
+# ── fix pipeline ────────────────────────────────────────────────────────────
+agent_run_iterations_multiplier: 7   # max_iterations = max_steps_per_subagent * this
+fix_batch_size: 16
+fix_concurrency: 16         # parallel workers for env_fix server revision

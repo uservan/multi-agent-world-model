@@ -676,7 +676,7 @@ def run(args: PipelineConfig) -> None:
 
     Path(args.databases_dir).mkdir(parents=True, exist_ok=True)
 
-    client = LLMClient(api_key=args.api_key, base_url=args.base_url, aws_region=args.aws_region)
+    client = LLMClient.from_config(args)
     write_lock = threading.Lock()
 
     pending = [t for t in tasks if not (records.get(t["task_id"]) and records[t["task_id"]].get("fingerprint") == _task_fingerprint(t))]

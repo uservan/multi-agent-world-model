@@ -1,3 +1,6 @@
+- ps -ef | grep "main.py --mode generate" | grep -v grep || echo "全部停止"
+- source export.sh && nohup python main.py --mode generate --config core/config/gen_kimi.yml > gen_$(date +%m%d_%H%M).log 2>&1 & echo "PID: $!"
+
 # Multi-Agent World Model
 
 A pipeline that **generates** multi-agent RL training data and **evaluates** agents on it.

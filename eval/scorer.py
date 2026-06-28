@@ -59,7 +59,8 @@ def score_task(runtime, verifiers: dict[str, str], task_id: str) -> tuple[dict, 
 def _cost(tokens: dict, price: tuple[float, float] | None) -> float:
     if not price:
         return 0.0
-    return tokens.get("in", 0) * price[0] + tokens.get("out", 0) * price[1]
+    # YAML may parse "1e-06" (no decimal point) as a string — coerce to be safe.
+    return tokens.get("in", 0) * float(price[0]) + tokens.get("out", 0) * float(price[1])
 
 
 def aggregate(

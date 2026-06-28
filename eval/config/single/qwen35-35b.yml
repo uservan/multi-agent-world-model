@@ -1,0 +1,24 @@
+# Single-agent eval — one model does everything.   model: Qwen3.5-35B-A3B
+mode: single
+
+orch_model: Qwen3.5-35B-A3B
+orch_api_key: EMPTY
+orch_base_url: http://127.0.0.1:30000/v1
+orch_input_cost: 1.4e-07
+orch_output_cost: 1.0e-06
+orch_llm_params:
+  temperature: 0.6
+
+n: 5
+base_seed: 42
+temperature: 0.6
+max_completion_tokens: 16384
+min_completion_tokens: 65536
+max_turns: 200   # episode ends ONLY on <done> or this cap
+
+# Data sources
+task_final: outputs/generated_new/verified/task_final.jsonl
+platforms_input: outputs/platforms.jsonl
+envs_input: outputs/generated_new/envs_fixed.jsonl
+databases_dir: outputs/generated_new/databases
+eval_root: outputs/eval/generated_new_200

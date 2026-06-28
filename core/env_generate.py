@@ -63,7 +63,7 @@ def run(args: PipelineConfig) -> None:
         logger.success("All platforms already processed.")
         return
 
-    client = LLMClient(api_key=args.api_key, base_url=args.base_url, aws_region=args.aws_region)
+    client = LLMClient.from_config(args)
 
     success = failed_count = 0
     with ThreadPoolExecutor(max_workers=args.concurrency) as executor:

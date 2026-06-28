@@ -353,7 +353,7 @@ def run(args: PipelineConfig, batch_file: str, *, platform_locks: PlatformLocks 
         logger.info("No data suggestions found, skipping data fix.")
         return
 
-    client = LLMClient(api_key=args.api_key, base_url=args.base_url, aws_region=args.aws_region)
+    client = LLMClient.from_config(args)
 
     work_items: list[tuple[str, str, dict, dict, str]] = []
     for task_id, platform_map in data_suggestions.items():

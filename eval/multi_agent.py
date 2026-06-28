@@ -17,7 +17,7 @@ from loguru import logger
 
 from eval.agent import EventLog, ModelClient, run_agent_loop
 from eval.platform import PlatformRuntime
-from eval.prompts import build_orchestrator_prompt, build_subagent_prompt
+from eval.prompts import build_orchestrator_prompt, build_subagent_prompt, SUBAGENT_SUMMARY_PROMPT
 from eval.scorer import score_task
 from eval.tools import make_http_executor
 
@@ -37,6 +37,8 @@ async def run_task(
     max_turns: int,
     max_concurrent: int,
     max_queue: int,
+    sub_max_turns: int = 30,
+    orch_style: str = "neutral",
 ) -> dict:
     """Run one multi-agent attempt. Returns a complete trajectory dict."""
     task_id = task.get("task_id") or task["label"]
@@ -58,17 +60,25 @@ async def run_task(
     queue_size = {"n": 0}
 
     async def _run_subagent(tid: str, description: str, return_requirements: str) -> None:
-        async with semaphore:
-            actor = f"subagent_{sub_counter['n']}"
-            sub_counter["n"] += 1
-            system, user = build_subagent_prompt(description, return_requirements)
-            final_text, tokens = await run_agent_loop(
-                actor, system, user, sub, http_exec, event_log, max_turns,
-            )
-            sub_tokens["in"] += tokens["in"]
-            sub_tokens["out"] += tokens["out"]
-            results[tid] = _extract_result(final_text)
-        queue_size["n"] -= 1
+        try:
+            async with semaphore:
+                actor = f"subagent_{sub_counter['n']}"
+                sub_counter["n"] += 1
+                system, user = build_subagent_prompt(description, return_requirements)
+                final_text, tokens = await run_agent_loop(
+                    actor, system, user, sub, http_exec, event_log, sub_max_turns,
+                    final_prompt=SUBAGENT_SUMMARY_PROMPT,
+                )
+                sub_tokens["in"] += tokens["in"]
+                sub_tokens["out"] += tokens["out"]
+                results[tid] = _extract_result(final_text)
+        except asyncio.CancelledError:
+            raise                                       # task-end cleanup — let it propagate
+        except Exception as e:
+            results[tid] = f"ERROR: sub-agent failed: {e}"  # never leave it stuck on "pending"
+        finally:
+            queue_size["n"] -= 1        # free the queue slot
+            pending.pop(tid, None)      # drop the finished task handle from the registry
 
     async def orchestrator_executor(call: dict) -> str:
         name = call.get("name")
@@ -100,13 +110,10 @@ async def run_task(
             if blocking:
                 waits = [pending[t] for t in task_ids if t in pending and not pending[t].done()]
                 if waits:
-                    try:
-                        await asyncio.wait_for(asyncio.gather(*waits, return_exceptions=True), timeout=timeout)
-                    except asyncio.TimeoutError:
-                        for w in waits:
-                            if not w.done():
-                                w.cancel()
-                        await asyncio.gather(*waits, return_exceptions=True)
+                    # Wait up to `timeout`. Sub-agents not finished by then are NOT
+                    # cancelled — they keep running (bounded by sub_max_turns) and stay
+                    # "pending" for a later poll. The only place we cancel is task end.
+                    await asyncio.wait(waits, timeout=timeout)
             out = {t: results.get(t, "pending") for t in task_ids}
             return json.dumps(out, ensure_ascii=False)
 
@@ -119,10 +126,19 @@ async def run_task(
             if not runtime.start(p, resources[p]):
                 raise RuntimeError(f"platform failed to start: {p}")
 
-        system, user = build_orchestrator_prompt(goal, runtime.platform_map(), max_concurrent, max_queue)
-        _, orch_tokens = await run_agent_loop(
-            "orchestrator", system, user, orch, orchestrator_executor, event_log, max_turns,
-        )
+        system, user = build_orchestrator_prompt(
+            goal, runtime.platform_map(), max_concurrent, max_queue, orch_style)
+        agent_error = None
+        orch_tokens = {"in": 0, "out": 0}
+        try:
+            _, orch_tokens = await run_agent_loop(
+                "orchestrator", system, user, orch, orchestrator_executor, event_log, max_turns,
+            )
+        except Exception as e:
+            # Orchestrator crashed (e.g. context-length overflow). Don't drop the run —
+            # score whatever was accomplished against the DB and record acc + error.
+            agent_error = str(e)
+            logger.warning(f"[{task_id}] orchestrator loop failed, scoring partial state: {e}")
 
         # Cancel any sub-agents still running
         for t in pending.values():
@@ -143,6 +159,7 @@ async def run_task(
         "status": "complete",
         "events": event_log.events,
         "verifier_results": verifier_results,
+        "error": agent_error,
         "acc": acc,
         "tokens": {"orch": orch_tokens, "sub": sub_tokens},
     }

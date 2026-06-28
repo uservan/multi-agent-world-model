@@ -11,6 +11,19 @@ _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 _TOOL_CALL_RE = re.compile(r"<tool_call>\s*(.*?)\s*</tool_call>", re.DOTALL)
 _FUNCTION_RE = re.compile(r"<function\s*=\s*([^>\s]+)\s*>(.*?)</function>", re.DOTALL)
 _PARAMETER_RE = re.compile(r"<parameter\s*=\s*([^>\s]+)\s*>\s*(.*?)\s*</parameter>", re.DOTALL)
+# Kimi-K2.6 native tool-call tokens — they leak into content as text when the request
+# doesn't use the OpenAI tools API (this eval uses a text protocol), e.g.
+#   <|tool_call_begin|>functions.http:0<|tool_call_argument_begin|>{"method":"GET",...}<|tool_call_end|>
+_KIMI_TOOL_RE = re.compile(
+    r"<\|tool_call_begin\|>\s*(.*?)\s*<\|tool_call_argument_begin\|>\s*(.*?)\s*<\|tool_call_end\|>",
+    re.DOTALL,
+)
+
+
+def _kimi_tool_name(raw_id: str) -> str:
+    """'functions.http:0' -> 'http'."""
+    nm = raw_id.strip().split(":")[0].strip()
+    return nm[len("functions."):] if nm.startswith("functions.") else nm
 
 
 def _coerce(value: str):
@@ -58,18 +71,43 @@ def parse_tool_calls_detailed(content: str) -> tuple[list[dict], list[str]]:
     errors: list[str] = []
     # Ignore tool-call drafts inside the model's reasoning so they aren't executed.
     content = _THINK_RE.sub("", content)
+
+    def _add(name: str, args: dict) -> None:
+        if name.startswith("mcp_tool_"):
+            args = {"tool_name": name, "arguments": args or {}}
+            name = "call_tool"
+        calls.append({"id": f"call_{len(calls)}", "name": name, "arguments": args})
+
+    # 1) Native XML: <function=NAME><parameter=k>v</parameter>...</function>. Matched DIRECTLY (not
+    #    requiring a wrapping <tool_call></tool_call>) — GLM-5.2 often omits the closing </tool_call>.
+    for fm in _FUNCTION_RE.finditer(content):
+        name = fm.group(1).strip()
+        args = {k.strip(): _coerce(v) for k, v in _PARAMETER_RE.findall(fm.group(2))}
+        _add(name, args)
+
+    # 2) JSON form inside <tool_call>{...}</tool_call> (skip <function> blocks — handled above)
     for i, m in enumerate(_TOOL_CALL_RE.findall(content)):
         raw = m.strip()
+        if "<function" in raw:
+            continue
         try:
             name, args = _parse_block(raw)
         except Exception as e:
             snippet = raw if len(raw) <= 200 else raw[:200] + "…"
             errors.append(f"tool_call #{i + 1}: could not parse — {e}. Received: {snippet}")
             continue
-        if name.startswith("mcp_tool_"):
-            args = {"tool_name": name, "arguments": args or {}}
-            name = "call_tool"
-        calls.append({"id": f"call_{i}", "name": name, "arguments": args})
+        _add(name, args)
+
+    # Kimi-K2.6 native token format (a model emits one protocol or the other, so this is
+    # additive — only one branch matches for any given turn).
+    for j, (raw_id, raw_args) in enumerate(_KIMI_TOOL_RE.findall(content)):
+        try:
+            args = json.loads(raw_args.strip())
+        except Exception as e:
+            snippet = raw_args.strip()[:200]
+            errors.append(f"kimi tool_call #{j + 1}: bad JSON args — {e}. Received: {snippet}")
+            continue
+        _add(_kimi_tool_name(raw_id), args if isinstance(args, dict) else {})
     return calls, errors
 
 

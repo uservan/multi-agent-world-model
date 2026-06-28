@@ -340,6 +340,113 @@ SCENE_INTERACTION_PATTERNS = [
 ]
 
 
+# Strict, shared criteria for each inter-scene pattern. Injected into BOTH the
+# scene-plan generation prompt and the _check_transition validator so the model
+# builds to the exact standard it is later judged against. Criteria mirror the
+# real discard reasons seen in generation logs.
+PATTERN_RULES = {
+    "pick_best": {
+        "criteria": (
+            "Scene i+1 acts on EXACTLY ONE result from scene i — the single best by a "
+            "named attribute (cheapest, highest-rated, soonest). At least one step in "
+            "scene i+1 must consume a return value from scene i."
+        ),
+        "good": "Scene 1 compares 4 laptops by price → Scene 2 buys ONLY the cheapest (uses its product_id).",
+        "bad":  "Scene 1 finds 4 laptops → Scene 2 buys two of them (that is filter_subset, not pick_best).",
+    },
+    "act_on_all": {
+        "criteria": (
+            "Scene i+1 performs the action on EVERY result scene i produced. If scene i "
+            "returned K items (counting across all its sub-agents/platforms), scene i+1 "
+            "must contain K corresponding actions — not one, not a subset. Each action "
+            "must consume a scene i return value."
+        ),
+        "good": "Scene 1 finds 3 products (RKT-338201, -338205, -338210) → Scene 2 places 3 orders, one per product.",
+        "bad":  "Scene 1 returns 3 products → Scene 2 orders only 1 of them.",
+    },
+    "filter_subset": {
+        "criteria": (
+            "Scene i+1 applies an EXPLICIT PER-ITEM condition (a threshold on a per-result "
+            "attribute, e.g. rating > 4.2, price < $50) to the FULL set of scene i results, "
+            "keeps only the items that pass, and acts on that subset. It must (1) reference "
+            "the full result set, (2) apply the stated condition item-by-item, (3) drop the "
+            "failing items. It is NOT filter_subset if scene i+1 just reuses items scene i "
+            "already pre-selected (pass-through), or applies an AGGREGATE/combined threshold "
+            "(e.g. sum > $2,000) — that is aggregate_decide."
+        ),
+        "good": "Scene 1 returns 5 listings with ratings → Scene 2 keeps the 3 with rating > 4.2 and books them.",
+        "bad":  "Scene 1 already returns 'recommended' items and Scene 2 just books them (no own filter), OR Scene 2 checks combined total > $2,000 (aggregate, not per-item).",
+    },
+    "aggregate_decide": {
+        "criteria": (
+            "Scene i+1 has an explicit step that COMBINES MULTIPLE DISTINCT signals (>=2 "
+            "different factors: price + distance + availability, etc.) from scene i into a "
+            "single NEW decision or score, then acts on it. Passing through one pre-computed "
+            "value from scene i (e.g. the already-chosen lowest-price option) is NOT "
+            "aggregate_decide."
+        ),
+        "good": "Scene 1 returns price, distance, coupon per pharmacy → Scene 2 computes a weighted score across all three and picks one.",
+        "bad":  "Scene 1 already determined the lowest-price pharmacy → Scene 2 just uses it (single passed-through signal).",
+    },
+    "conditional_branch": {
+        "criteria": (
+            "Scene i+1's path is DETERMINED BY scene i's actual outcome shown above. If scene "
+            "i SUCCEEDED (found results / passed its check), scene i+1 MUST take the success "
+            "path; ONLY if scene i failed or returned empty may scene i+1 take the fallback "
+            "path. The branch scene i+1 actually takes must be CONSISTENT with scene i's real "
+            "outcome — a fallback that fires while scene i succeeded is wrong."
+        ),
+        "good": "Scene 1 finds no availability → Scene 2 rebooks on the backup platform (fallback fires correctly).",
+        "bad":  "Scene 1 confirmed both reservations (success), yet Scene 2 still runs the fallback path.",
+    },
+    "cascaded_dependency": {
+        "criteria": (
+            "Scene i+1's parameters are directly determined by a SPECIFIC identifier/value "
+            "returned by scene i (an ID, token, name). At least one step in scene i+1 must "
+            "consume that exact scene i return value as an input param."
+        ),
+        "good": "Scene 1 returns seller_id S-4821 → Scene 2 fetches that seller's detail using S-4821.",
+        "bad":  "Scene 2 independently searches and never uses any scene 1 return value.",
+    },
+}
+
+
+def _pattern_rule_block(name: str) -> str:
+    """Formatted strict-criteria block for a pattern; empty for unknown/independent."""
+    r = PATTERN_RULES.get(name)
+    if not r:
+        return ""
+    return (
+        f"\n  REQUIRED to satisfy '{name}':\n"
+        f"  {r['criteria']}\n"
+        f"  GOOD example: {r['good']}\n"
+        f"  BAD example:  {r['bad']}"
+    )
+
+
+# Producer-side guidance for the SCENE THAT FEEDS a transition (scene i). The
+# common failure is scene i doing the downstream work itself (pre-filtering,
+# pre-selecting, returning a single item) so scene i+1 has nothing left to do
+# and is judged a pass-through. This tells scene i to leave the raw materials
+# the pattern needs and NOT complete the next scene's job.
+PATTERN_PRODUCER_RULES = {
+    "pick_best": "Produce MULTIPLE comparable options with the ranking attribute (price/rating). Do NOT pre-select the best — the next scene picks it.",
+    "act_on_all": "Produce a MULTI-ITEM result set (return several distinct ids/items). The next scene acts on every one, so there must be several to act on.",
+    "filter_subset": "Produce the FULL UNFILTERED result set (several items) each carrying the attribute to be filtered (e.g. each listing's rating/price). Do NOT pre-filter or pre-select — leave the per-item filtering to the next scene.",
+    "aggregate_decide": "Produce the MULTIPLE DISTINCT signals (>=2 factors: price, distance, availability...) as separate return values. Do NOT pre-combine them into a decision — the next scene aggregates.",
+    "conditional_branch": "Produce a concrete OUTCOME the next scene branches on — a success/failure flag plus data as actual return values (not just echoing original goal params), so the next scene can both branch on it AND consume it.",
+    "cascaded_dependency": "Produce the SPECIFIC identifier (id/token/name) the next scene will consume as an input param.",
+}
+
+
+def _pattern_producer_block(name: str) -> str:
+    """Producer-side hint for scene i so it leaves work for scene i+1; empty if none."""
+    rule = PATTERN_PRODUCER_RULES.get(name)
+    if not rule:
+        return ""
+    return f"\n  PRODUCER duty for '{name}': {rule}"
+
+
 def _assign_transition_patterns(
     num_transitions: int,
     pattern_counts: dict[str, int],
@@ -632,8 +739,10 @@ def _build_plan_prompt(
     trans_lines = ""
     if transition_in and not is_independent:
         trans_lines += f"\nTransition from previous scene — '{transition_in['name']}': {transition_in['desc']}"
+        trans_lines += _pattern_rule_block(transition_in["name"])
     if transition_out:
         trans_lines += f"\nTransition to next scene — '{transition_out['name']}': {transition_out['desc']}"
+        trans_lines += _pattern_producer_block(transition_out["name"])
 
     prev_context = ""
     if not is_independent:
@@ -1779,10 +1888,10 @@ def _check_transition(
 
     check_prompt = f"""Check ONLY: Does scene {t+2} properly implement the '{pattern['name']}' transition from scene {t+1}?
 
-Transition — '{pattern['name']}': {pattern['desc']}
+Transition — '{pattern['name']}': {pattern['desc']}{_pattern_rule_block(pattern['name'])}
 
 Check both:
-1. The transition EFFECT is correctly realized — scene {t+2}'s behavior matches what '{pattern['name']}' requires
+1. The transition EFFECT is correctly realized — scene {t+2}'s behavior matches the REQUIRED criteria above
 2. At least one step in scene {t+2} actually uses a return value from scene {t+1}
 
 Scene {t+1} task_operations:
@@ -1910,10 +2019,12 @@ def run(args: PipelineConfig) -> None:
     platform_counts = load_platform_counts(args.tasks_output)
     pattern_counts = load_pattern_counts(args.tasks_output)
 
-    gen_client = LLMClient(api_key=args.api_key, base_url=args.base_url, aws_region=args.aws_region)
+    gen_client = LLMClient.from_config(args)
     embed_client =OpenAI(
         api_key=args.embed_api_key or os.environ.get("EMBEDDING_OPENAI_API_KEY")
               or os.environ.get("OPENAI_API_KEY"),
+        # pin to real OpenAI so OPENAI_BASE_URL (now the local GLM endpoint) doesn't redirect embeddings
+        base_url=os.environ.get("EMBEDDING_OPENAI_BASE_URL") or "https://api.openai.com/v1",
     )
 
     # ── Step 1: determine which (budget, structure) pairs need more tasks ──────
