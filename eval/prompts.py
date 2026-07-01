@@ -202,13 +202,46 @@ true
         "delegate": "  - Analyze: break the task into parts — and plan to delegate every part you can to sub-agents.\n",
         "solo": "  - Analyze: which parts (if any) are clearly worth delegating? Default to doing the rest yourself.\n",
     }
-    opening = OPENINGS.get(style, OPENINGS["neutral"])
-    plan_q1 = PLAN_Q1.get(style, PLAN_Q1["neutral"])
+    # ── Variant A (2026-06-29): identity == the single agent's, with the delegation bias moved to a
+    # separate guidance line placed right BEFORE the spawn tool (instead of an "orchestrator" opening).
+    # Tests whether GLM's self-execution drop comes from the manager identity rather than delegation.
+    # New style keys a_neutral / a_delegate / a_solo; the old neutral/delegate/solo are untouched
+    # (guidance_block is "" for them, so their prompt is byte-identical to before).
+    _SINGLE_IDENTITY = (
+        "You are an AI agent that completes a user's task by operating one or more platform REST APIs."
+    )
+    DELEGATION_GUIDANCE = {
+        "a_neutral": (
+            "You also have the option to delegate parts of the work to sub-agents. For each part, choose "
+            "freely: do it yourself with the http tool, or delegate it to a sub-agent — whichever fits better."
+        ),
+        "a_delegate": (
+            "You also have the option to delegate parts of the work to sub-agents, and you should lean on it "
+            "heavily: push almost every part of the task to a sub-agent, run independent parts in parallel, "
+            "and use the http tool yourself only when a quick check cannot be delegated."
+        ),
+        "a_solo": (
+            "You also have the option to delegate parts of the work to sub-agents, but treat that as the "
+            "exception — do the work yourself by default. Only delegate a part when it is clearly worth "
+            "splitting out (independent parts you can run in parallel, or a result that needs independent "
+            "verification). When in doubt, do it yourself."
+        ),
+    }
+
+    if style in DELEGATION_GUIDANCE:
+        opening = _SINGLE_IDENTITY
+        plan_q1 = PLAN_Q1[style[2:]]            # a_neutral -> neutral, a_delegate -> delegate, ...
+        guidance_block = DELEGATION_GUIDANCE[style] + "\n\n"
+    else:
+        opening = OPENINGS.get(style, OPENINGS["neutral"])
+        plan_q1 = PLAN_Q1.get(style, PLAN_Q1["neutral"])
+        guidance_block = ""
 
     system = (
         opening + "\n\n"
         + _platform_section(platform_map) + "\n\n"
         + _HTTP_TOOL + "\n\n"
+        + guidance_block
         + spawn + "\n\n"
         + "Before acting, output a brief <plan>:\n"
         + plan_q1

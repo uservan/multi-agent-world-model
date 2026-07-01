@@ -21,10 +21,9 @@ aws_region: us-east-1       # only used for Bedrock (us.anthropic.* models)
 llm_params:
   extra_body:
     chat_template_kwargs:
-      reasoning_effort: high
-# Floor on max_completion_tokens so a small per-call cap isn't eaten by reasoning
-# → empty content. Set null to disable.
-min_completion_tokens: 65536
+      enable_thinking: false   # NO-THINK mode (fast; GLM uses enable_thinking, not Kimi's `thinking`)
+# No-think → no reasoning to truncate, so the 64k floor isn't needed (null = each call uses its own cap).
+min_completion_tokens: null
 
 # ── Output paths (distinct dir so GLM data doesn't mix with other models) ─────
 generated_dir: outputs/eval_gen_glm

@@ -1,0 +1,37 @@
+# Multi-agent eval — Qwen3.5-397B-A17B, orch_style=a_delegate (Variant A: identity == single agent's,
+# delegation bias moved to a guidance line before the spawn tool).
+mode: multi
+
+orch_model: Qwen3.5-397B-A17B
+orch_api_key: EMPTY
+orch_base_url: http://127.0.0.1:30000/v1
+orch_input_cost: 3.85e-07
+orch_output_cost: 2.45e-06
+orch_llm_params:
+  temperature: 0.6
+
+sub_model: Qwen3.5-397B-A17B
+sub_api_key: EMPTY
+sub_base_url: http://127.0.0.1:30000/v1
+sub_input_cost: 3.85e-07
+sub_output_cost: 2.45e-06
+sub_llm_params:
+  temperature: 0.6
+
+n: 5
+base_seed: 42
+temperature: 0.6
+max_completion_tokens: 16384
+min_completion_tokens: 65536
+max_turns: 200
+sub_max_turns: 200
+max_concurrent: 4
+max_queue: 16
+orch_style: a_delegate
+
+# Data sources
+task_final: outputs/generated_new/verified/task_final.jsonl
+platforms_input: outputs/platforms.jsonl
+envs_input: outputs/generated_new/envs_fixed.jsonl
+databases_dir: outputs/generated_new/databases
+eval_root: outputs/eval/generated_new_200_a_delegate
