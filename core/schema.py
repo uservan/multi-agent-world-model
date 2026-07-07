@@ -251,6 +251,9 @@ def _create_db(db_path: str, schemas: list) -> tuple[bool, str]:
                 ddl = item.get("ddl", "").strip()
                 if not ddl:
                     continue
+                # Normalize trailing ';' — some models (e.g. Claude) emit DDL without it.
+                if not ddl.endswith(";"):
+                    ddl += ";"
                 safe = ddl.replace("CREATE TABLE ", "CREATE TABLE IF NOT EXISTS ")
                 for stmt in (s.strip() for s in safe.split(";") if s.strip()):
                     conn.execute(stmt)

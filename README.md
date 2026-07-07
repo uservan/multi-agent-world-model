@@ -1,5 +1,5 @@
 - ps -ef | grep "main.py --mode generate" | grep -v grep || echo "全部停止"
-- source export.sh && nohup python main.py --mode generate --config core/config/gen_kimi.yml > gen_$(date +%m%d_%H%M).log 2>&1 & echo "PID: $!"
+- source export.sh && nohup python main.py --mode generate --config multi-agent-world-model/core/config/gen_claude.yml > gen_$(date +%m%d_%H%M).log 2>&1 & echo "PID: $!"
 
 # Multi-Agent World Model
 

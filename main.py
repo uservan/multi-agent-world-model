@@ -11,6 +11,7 @@ from core.config import PipelineConfig
 from utils.fix_locks import FixLocks
 import core.scenario as scenario_step
 import core.task as task_step
+import core.consolidate as consolidate_step
 import core.schema as schema_step
 import core.spec as spec_step
 import core.env_generate as env_generate_step
@@ -92,6 +93,9 @@ def run_generate(args: PipelineConfig) -> None:
     for attempt in range(1, args.max_task_attempts + 1):
         logger.info(f"Task generation attempt {attempt}/{args.max_task_attempts}")
         task_step.run(args)
+
+    logger.info("=== Step 2.5/7: Consolidate (merge near-duplicate actions) ===")
+    consolidate_step.run(args)
 
     # logger.info("=== Step 3/7: Schema ===")
     # schema_step.run(args)

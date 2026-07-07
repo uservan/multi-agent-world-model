@@ -50,6 +50,8 @@ For each endpoint, strictly follow the return field rules:
 - write (create/update/delete/book/order/cancel) → "returns": ["id", "status"] only
 - get_status/confirm → "returns": status-related fields only
 
+Every parameter MUST include a non-empty "description": one concrete line stating what the parameter means and how it is used (mention its format, unit, or an example value when helpful). Never leave a param description blank or generic.
+
 Output a JSON array of endpoint objects:
 [
   {{
@@ -60,7 +62,8 @@ Output a JSON array of endpoint objects:
     "params": {{
       "param_name": {{
         "type": "str|int|float|bool",
-        "required": true
+        "required": true,
+        "description": "one concrete line: what this parameter means and how it is used (include format/unit/example if helpful)"
       }}
     }},
     "returns": ["field1", "field2"],
@@ -81,11 +84,11 @@ FEW_SHOT_EXAMPLES = [
                 "path": "/products/search",
                 "description": "Search products by keyword and filters; returns basic listing only",
                 "params": {
-                    "query": {"type": "str", "required": True},
-                    "brand": {"type": "str", "required": False},
-                    "category": {"type": "str", "required": False},
-                    "price_max": {"type": "float", "required": False},
-                    "rating_min": {"type": "float", "required": False},
+                    "query": {"type": "str", "required": True, "description": "Free-text search keyword matched against product name/description"},
+                    "brand": {"type": "str", "required": False, "description": "Filter to a single brand name, e.g. 'Sony'"},
+                    "category": {"type": "str", "required": False, "description": "Filter to a product category, e.g. 'Electronics'"},
+                    "price_max": {"type": "float", "required": False, "description": "Upper bound on price in USD; only products at or below this are returned"},
+                    "rating_min": {"type": "float", "required": False, "description": "Lower bound on average star rating (0-5)"},
                 },
                 "returns": ["id", "name", "price"],
                 "tables_read": ["products"],
@@ -96,7 +99,7 @@ FEW_SHOT_EXAMPLES = [
                 "method": "GET",
                 "path": "/products/{product_id}",
                 "description": "Get full details of a single product by id",
-                "params": {"product_id": {"type": "int", "required": True}},
+                "params": {"product_id": {"type": "int", "required": True, "description": "Numeric id of the product to fetch (from search results)"}},
                 "returns": ["id", "name", "brand", "category", "price", "rating", "inventory", "seller_id"],
                 "tables_read": ["products"],
                 "tables_write": [],
@@ -107,8 +110,8 @@ FEW_SHOT_EXAMPLES = [
                 "path": "/promos/check",
                 "description": "Check if a promo code applies to a product; returns eligibility and discounted price",
                 "params": {
-                    "product_id": {"type": "int", "required": True},
-                    "promo_code": {"type": "str", "required": True},
+                    "product_id": {"type": "int", "required": True, "description": "Numeric id of the product to apply the promo to"},
+                    "promo_code": {"type": "str", "required": True, "description": "Promo code string to validate, e.g. 'SAVE10'"},
                 },
                 "returns": ["eligible", "discounted_price"],
                 "tables_read": ["products"],
@@ -120,8 +123,8 @@ FEW_SHOT_EXAMPLES = [
                 "path": "/cart/items",
                 "description": "Add a product to the cart",
                 "params": {
-                    "product_id": {"type": "int", "required": True},
-                    "quantity": {"type": "int", "required": True},
+                    "product_id": {"type": "int", "required": True, "description": "Numeric id of the product to add"},
+                    "quantity": {"type": "int", "required": True, "description": "Number of units to add; must be a positive integer"},
                 },
                 "returns": ["id", "status"],
                 "tables_read": [],
@@ -132,7 +135,7 @@ FEW_SHOT_EXAMPLES = [
                 "method": "GET",
                 "path": "/orders/{order_id}/status",
                 "description": "Get the current status of an order",
-                "params": {"order_id": {"type": "int", "required": True}},
+                "params": {"order_id": {"type": "int", "required": True, "description": "Numeric id of the order to check"}},
                 "returns": ["status", "tracking_number"],
                 "tables_read": ["orders"],
                 "tables_write": [],
@@ -148,8 +151,8 @@ FEW_SHOT_EXAMPLES = [
                 "path": "/repos",
                 "description": "List repositories with optional filters; returns basic info only",
                 "params": {
-                    "language": {"type": "str", "required": False},
-                    "visibility": {"type": "str", "required": False},
+                    "language": {"type": "str", "required": False, "description": "Filter by primary programming language, e.g. 'Python'"},
+                    "visibility": {"type": "str", "required": False, "description": "Filter by repo visibility, e.g. 'public' or 'private'"},
                 },
                 "returns": ["id", "name", "visibility"],
                 "tables_read": ["repositories"],
@@ -160,7 +163,7 @@ FEW_SHOT_EXAMPLES = [
                 "method": "GET",
                 "path": "/repos/{repo_id}",
                 "description": "Get full details of a single repository",
-                "params": {"repo_id": {"type": "int", "required": True}},
+                "params": {"repo_id": {"type": "int", "required": True, "description": "Numeric id of the repository to fetch"}},
                 "returns": ["id", "name", "description", "language", "stars", "visibility", "owner_id"],
                 "tables_read": ["repositories"],
                 "tables_write": [],
@@ -171,10 +174,10 @@ FEW_SHOT_EXAMPLES = [
                 "path": "/repos/{repo_id}/pulls",
                 "description": "Create a pull request in a repository",
                 "params": {
-                    "repo_id": {"type": "int", "required": True},
-                    "title": {"type": "str", "required": True},
-                    "head_branch": {"type": "str", "required": True},
-                    "base_branch": {"type": "str", "required": True},
+                    "repo_id": {"type": "int", "required": True, "description": "Numeric id of the repository the PR targets"},
+                    "title": {"type": "str", "required": True, "description": "Title of the pull request"},
+                    "head_branch": {"type": "str", "required": True, "description": "Name of the source branch containing the changes"},
+                    "base_branch": {"type": "str", "required": True, "description": "Name of the target branch to merge into, e.g. 'main'"},
                 },
                 "returns": ["id", "status"],
                 "tables_read": [],
@@ -186,8 +189,8 @@ FEW_SHOT_EXAMPLES = [
                 "path": "/repos/{repo_id}/pulls/{pr_id}/status",
                 "description": "Get the current status of a pull request",
                 "params": {
-                    "repo_id": {"type": "int", "required": True},
-                    "pr_id": {"type": "int", "required": True},
+                    "repo_id": {"type": "int", "required": True, "description": "Numeric id of the repository containing the PR"},
+                    "pr_id": {"type": "int", "required": True, "description": "Numeric id of the pull request to check"},
                 },
                 "returns": ["status", "merged", "review_count"],
                 "tables_read": ["pull_requests"],

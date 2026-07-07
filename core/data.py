@@ -125,7 +125,18 @@ def _task_fingerprint(task: dict) -> str:
 # ── Format helpers ─────────────────────────────────────────────────────────────
 
 def _format_schema_ddl(schema_item: dict) -> str:
-    return "\n".join(t.get("ddl", "") for t in schema_item.get("schemas", []))
+    # Normalize each DDL to end with ';' — some models (e.g. Claude) emit CREATE TABLE
+    # statements without a trailing semicolon, which breaks any consumer that splits the
+    # joined blob on ';' (e.g. _try_inserts_in_memory) and silently yields zero tables.
+    ddls = []
+    for t in schema_item.get("schemas", []):
+        ddl = (t.get("ddl", "") or "").rstrip()
+        if not ddl:
+            continue
+        if not ddl.endswith(";"):
+            ddl += ";"
+        ddls.append(ddl)
+    return "\n".join(ddls)
 
 
 def _robust_json(text: str) -> dict:
@@ -396,8 +407,8 @@ def _try_inserts_in_memory(schema_ddl: str, tables: list[dict]) -> tuple[bool, s
         for stmt in (s.strip() for s in schema_ddl.split(";") if s.strip()):
             try:
                 conn.execute(stmt)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"mem-check schema DDL failed: {e} | stmt={stmt[:80]}")
         for table in tables:
             for stmt in table.get("insert_statements", []):
                 stmt = stmt.strip()

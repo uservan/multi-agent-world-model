@@ -68,11 +68,12 @@ CRITICAL — Request body rules:
 - POST / PUT / PATCH endpoints MUST accept all input fields via a Pydantic request body model — NEVER use Query(...) or query parameters for write operations
 - Define a dedicated input Pydantic class (e.g. CreateVendorRequest, UpdateOrderRequest) for every POST/PUT/PATCH endpoint
 - The only non-body parameters allowed on write endpoints are path parameters and the X-Task-ID header
+- For GET/DELETE query parameters, declare each with FastAPI's Query and copy the param's spec description into it, e.g. `brand: Optional[str] = Query(None, description="<exact description from the spec>")` — so every query parameter's meaning shows up in /openapi.json. Path parameters likewise use `Path(..., description="<exact description from the spec>")`.
 - POST request body Pydantic models MUST NOT include `id` as a field — the server always assigns the id internally via `new_id = (session.query(func.max(Model.id)).scalar() or 0) + 1`
 
 Pydantic v2 Rules:
 - Use model_config = ConfigDict(from_attributes=True) for ORM models
-- Use Field for every field with a description only — NEVER pass `example=` to Field() as it is deprecated in Pydantic v2; use `json_schema_extra={"example": ...}` if an example is needed
+- Use Field for every body field, and set Field(..., description=...) to the EXACT description given for that param in the spec (so it appears in /openapi.json) — NEVER pass `example=` to Field() as it is deprecated in Pydantic v2; use `json_schema_extra={"example": ...}` if an example is needed
 - Field names MUST NEVER clash with any Pydantic import name ("Field", "model_config", "model_validator", etc.) OR with any type name or class name used in the same module — if required, use a snake_case alias and Field(..., serialization_alias="original_name")
 - Do NOT use Python reserved keywords (return, class, global, etc.) as field names or function parameters — use a trailing underscore and map via Field(..., alias="keyword")
 - response_model must be a concrete Pydantic class, not a dynamic expression
@@ -844,7 +845,7 @@ def process_platform(
                  code = m.group(1).strip()
 
         if not code or not code.startswith(("import", "from")):
-            logger.warning(f"[{name}] Invalid code format (attempt {attempt})")
+            logger.warning(f"[{name}] Invalid code format (attempt {attempt}), {len(code)}")
             if attempt <= max_retries:
                 error_summaries.append("The response must be pure Python code starting with an import statement. No markdown, no JSON wrapper.")
             continue
