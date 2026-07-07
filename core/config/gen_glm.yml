@@ -1,44 +1,46 @@
 # ============================================================================
-# Data-generation config — GLM-5.2 (local sglang).
-#   Run:  python main.py --mode generate --config core/config/gen_glm.yml
-# Launch the GLM server first (glm52_serve/launch_node{0,1}.sh) so base_url is live.
-# Every key maps 1:1 to a field in core/config.py (PipelineConfig).
-# Secrets (OPENAI_API_KEY) stay in env / export.sh and are NEVER put here.
+# Data-generation config — GLM-5.2 (local sglang), TRAIN scale.
+#   Run:  sh/generate/generate_glm.sh   (它会 source export.sh + 从 READY 注入 base_url)
+#   或:   python main.py --mode generate --config core/config/gen_glm.yml
+# 先起 GLM 服务(sh/start/start_glm.sh)使端点就绪; 规模/结构对齐 gen_claude_train.yml,
+# 仅模型块换成本地 sglang 的 GLM-5.2。每个 key 1:1 对应 core/config.py(PipelineConfig)。
+# 密钥(OPENAI_API_KEY)只在 env / export.sh, 绝不写这里。
 # ============================================================================
 
 # ── Models ──────────────────────────────────────────────────────────────────
-# Names must match the sglang --served-model-name exactly.
-model: GLM-5.2             # cheap model: validation / repair / schema / spec
-gen_model: GLM-5.2         # strong model: creative generation (task.py, data.py)
-base_url: http://10.209.44.54:30000/v1   # wherever GLM is served
-aws_region: us-east-1       # only used for Bedrock (us.anthropic.* models)
+# 名字必须和 sglang --served-model-name 完全一致(start_glm.sh 里 NAME=glm-5.2)。
+model: glm-5.2             # cheap role: 校验/修复/schema/spec
+gen_model: glm-5.2         # strong role: 创造性生成 (task.py, data.py)
+# base_url 省略: 由 generate_glm.sh 从 logs/start/GLM-5.2/READY 读端点并 export OPENAI_BASE_URL。
+#   (端点 IP 每次 job 会变, 所以不写死在这里)
+aws_region: us-east-1       # 仅 Bedrock(us.anthropic.*)用; GLM 走 OpenAI 兼容端点忽略之
 
 # ── LLM tuning ──────────────────────────────────────────────────────────────
-# GLM uses enable_thinking / reasoning_effort (NOT Kimi's `thinking`):
-#   high reasoning: {extra_body: {chat_template_kwargs: {reasoning_effort: high}}}
-#   no-think:       {extra_body: {chat_template_kwargs: {enable_thinking: false}}}
-#   sampling:       add temperature / top_p at the same level
+# GLM 用 enable_thinking / reasoning_effort (不是 Kimi 的 `thinking`):
+#   高推理: {extra_body: {chat_template_kwargs: {reasoning_effort: high}}}
+#   不思考: {extra_body: {chat_template_kwargs: {enable_thinking: false}}}
+# 大规模生成默认 NO-THINK(快/省); 想提质就切 reasoning_effort: high 并把下面 min 设 65536。
 llm_params:
   extra_body:
     chat_template_kwargs:
-      enable_thinking: false   # NO-THINK mode (fast; GLM uses enable_thinking, not Kimi's `thinking`)
-# No-think → no reasoning to truncate, so the 64k floor isn't needed (null = each call uses its own cap).
+      enable_thinking: false   # NO-THINK 模式
+# No-think → 无 reasoning 要截断, 不需要 64k 下限 (null = 每次用各自的 cap)。
 min_completion_tokens: null
 
-# ── Output paths (distinct dir so GLM data doesn't mix with other models) ─────
-generated_dir: outputs/eval_gen_glm
-verified_dir: outputs/eval_gen_glm/verified
-scenario_input: outputs/scenario_platform_eval.yml   # platform pool fed into scenario step
+# ── Output paths (独立目录, GLM 训练数据不与其它模型混) ────────────────────────
+generated_dir: outputs/eval_gen_glm_train
+verified_dir: outputs/eval_gen_glm_train/verified
+scenario_input: outputs/scenario_platform.yml   # platform pool fed into scenario step (train 池)
 
 # ── Concurrency / retries ───────────────────────────────────────────────────
 concurrency: 16             # parallel structure workers
 max_retries: 3              # per-LLM-call retries
 max_completion_tokens: 65536
 
-# ── Generation scale ────────────────────────────────────────────────────────
-budget_list: [3, 5, 7, 9, 13]   # task "budget" buckets = total sub-agents across scenes
-num_structures: 10               # distinct scene/platform structures per budget
-tasks_per_structure: 4           # accepted tasks to collect per structure
+# ── Generation scale (对齐 gen_claude_train.yml) ─────────────────────────────
+budget_list: [3,5,7,8,9,10,11,13]   # task "budget" buckets = total sub-agents across scenes
+num_structures: 60               # distinct scene/platform structures per budget
+tasks_per_structure: 10           # accepted tasks to collect per structure
 max_task_attempts: 5             # outer passes over task generation
 max_structure_sample_attempts: 2000   # random draws to find unique structures per budget
 max_attempts_multiplier: 1       # per-structure attempt budget = need * this
@@ -69,5 +71,5 @@ distractor_low: 3           # supporting tables (users, settings)
 
 # ── fix pipeline ────────────────────────────────────────────────────────────
 agent_run_iterations_multiplier: 7   # max_iterations = max_steps_per_subagent * this
-fix_batch_size: 16
-fix_concurrency: 16         # parallel workers for env_fix server revision
+fix_batch_size: 8
+fix_concurrency: 8         # parallel workers for env_fix server revision

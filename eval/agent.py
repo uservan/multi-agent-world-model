@@ -150,8 +150,11 @@ async def run_agent_loop(
         event_log.add(actor, text, tool_calls=[t.get("arguments", t) for t in tool_calls],
                       tool_responses=responses, tokens=usage)
 
-        if done:
-            break
+        # A <done> in the SAME turn as tool calls is NOT honored: the model must first see
+        # these tool results, then declare completion in a clean turn (no tool calls). Guards
+        # against premature termination — e.g. spawning async sub-agents and signaling <done>
+        # before their results come back, or a <done> written mid-plan as example text. Only
+        # the no-tool-call branch above ends the episode, so <done>'s position doesn't matter.
 
         result_text = "Tool results:\n" + "\n---\n".join(responses)
         if parse_errors:  # some calls ran, others were malformed — note the ignored ones
