@@ -78,6 +78,11 @@ class EvalConfig:
     # Orchestrator delegation bias (multi mode only): neutral | delegate | solo
     orch_style: str = "neutral"
     # runtime / editable
+    # data_root: dataset root dir (e.g. outputs/eval_gen_claude). When set, the four
+    # paths below are derived from it (root/verified/task_final.jsonl, root/platforms.jsonl,
+    # root/envs.jsonl, root/databases) unless explicitly given in the yml, and server
+    # paths from envs.jsonl are re-rooted to root/servers/<basename>.
+    data_root: str = ""
     task_final: str = "outputs/generated/verified/task_final.jsonl"
     platforms_input: str = "outputs/platforms.jsonl"
     envs_input: str = "outputs/generated/envs.jsonl"
@@ -85,6 +90,10 @@ class EvalConfig:
     eval_root: str = "outputs/eval"
     # resolved at runtime
     run_dir: str = ""
+
+    @property
+    def servers_dir(self) -> str:
+        return str(Path(self.data_root) / "servers") if self.data_root else ""
 
     # ── Build from a plain dict (yml contents) ─────────────────────────────────
     @classmethod
@@ -95,6 +104,16 @@ class EvalConfig:
             raise ValueError("config needs at least 'mode' and 'orch_model'")
         if cfg.mode == "multi" and not cfg.sub_model:
             raise ValueError("mode 'multi' requires 'sub_model'")
+        if cfg.data_root:
+            root = Path(cfg.data_root)
+            if "task_final" not in d:
+                cfg.task_final = str(root / "verified" / "task_final.jsonl")
+            if "platforms_input" not in d:
+                cfg.platforms_input = str(root / "platforms.jsonl")
+            if "envs_input" not in d:
+                cfg.envs_input = str(root / "envs.jsonl")
+            if "databases_dir" not in d:
+                cfg.databases_dir = str(root / "databases")
         return cfg
 
     # ── Case 1: --init (new run) ───────────────────────────────────────────────

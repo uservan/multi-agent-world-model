@@ -158,24 +158,57 @@ Spawn a sub-agent:
 </parameter>
 </function>
 </tool_call>
-
-Collect results:
+or as JSON:
 <tool_call>
-<function=get_task_results>
-<parameter=task_ids>
-["<task_id>", ...]
+{{"name": "spawn_subagent", "arguments": {{"description": "<full, self-contained instructions incl. platform URL(s)>", "return_requirements": "<what to report back>"}}}}
+</tool_call>
+
+Check the queue — which task_ids are running / waiting / finished / error:
+<tool_call>
+<function=get_queue_status>
+</function>
+</tool_call>
+or as JSON:
+<tool_call>
+{{"name": "get_queue_status", "arguments": {{}}}}
+</tool_call>
+
+Inspect one sub-agent. summary=true returns its final report ("pending" if not done); logs=true returns its FULL message trail (every turn, tool call and response — can be very long). STRONGLY prefer summary and keep logs=false: pulling full logs floods your own context. If a summary is missing a value you need or a sub-agent failed mysteriously, prefer spawning a fresh sub-agent to re-fetch the value from the platform (or to investigate) over reading raw logs yourself; reach for logs=true only as a last resort:
+<tool_call>
+<function=get_task_info>
+<parameter=task_id>
+<task_id>
 </parameter>
-<parameter=blocking>
+<parameter=summary>
 true
 </parameter>
-<parameter=timeout>
-30
+<parameter=logs>
+false
 </parameter>
 </function>
 </tool_call>
-- task_ids is a JSON array; blocking is true/false; timeout is seconds.
-- blocking=false: finished tasks return their result, unfinished return "pending".
-- blocking=true: waits until all listed tasks finish or timeout."""
+or as JSON:
+<tool_call>
+{{"name": "get_task_info", "arguments": {{"task_id": "<task_id>", "summary": true, "logs": false}}}}
+</tool_call>
+
+Wait for one sub-agent — returns when it finishes or after timeout seconds. On finish the reply includes its summary; on timeout it is still running (NOT cancelled) and you can wait again or work on something else:
+<tool_call>
+<function=wait_task>
+<parameter=task_id>
+<task_id>
+</parameter>
+<parameter=timeout>
+60
+</parameter>
+</function>
+</tool_call>
+or as JSON:
+<tool_call>
+{{"name": "wait_task", "arguments": {{"task_id": "<task_id>", "timeout": 60}}}}
+</tool_call>
+
+Use whichever format you find more reliable — the same one as your http calls."""
 
     OPENINGS = {
         "neutral": (
@@ -271,8 +304,9 @@ true
         + "other sub-agents did. Make every description self-contained: the exact platform URL(s), any "
         + "IDs/values you have ALREADY discovered, the subtask GOAL (not every API call — it has the http "
         + "tool and discovers endpoints via GET /openapi.json), and what to report back.\n"
-        + "  - After spawning parallel sub-agents, keep making progress yourself while they run; poll with "
-        + "get_task_results (blocking=false), and block only when you need a result to continue.\n"
+        + "  - After spawning parallel sub-agents, keep making progress yourself while they run; check "
+        + "get_queue_status / get_task_info to see how they are doing, and wait_task only when you need a "
+        + "result to continue.\n"
         + "  - Collect every result you need before finishing.\n\n"
         + "When the entire task is complete, output <done>:\n"
         + "<done>\nsummary of what was accomplished and key values created\n</done>"

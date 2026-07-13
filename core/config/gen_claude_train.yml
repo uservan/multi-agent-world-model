@@ -30,7 +30,7 @@ max_retries: 3              # per-LLM-call retries
 max_completion_tokens: 65536
 
 # ── Generation scale ────────────────────────────────────────────────────────
-budget_list: [3,5,7,8,9,11,13,15]   # task "budget" buckets = total sub-agents across scenes
+budget_list: [3,5,7,8,9,11,13]   # task "budget" buckets = total sub-agents across scenes
 num_structures: 60               # distinct scene/platform structures per budget
 tasks_per_structure: 10           # accepted tasks to collect per structure
 max_task_attempts: 5             # outer passes over task generation
@@ -41,7 +41,7 @@ max_attempts_multiplier: 1       # per-structure attempt budget = need * this
 max_scenes: 4
 max_platforms_per_scene: 3
 max_agents_per_platform: 3
-min_steps_per_subagent: 5
+min_steps_per_subagent: 4
 max_steps_per_subagent: 20
 
 # ── Validation / dedup ──────────────────────────────────────────────────────

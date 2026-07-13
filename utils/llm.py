@@ -1,5 +1,6 @@
 import json
 import os
+import time
 
 
 class LLMClient:
@@ -63,14 +64,43 @@ class LLMClient:
 
     def _bedrock(self):
         if self._bedrock_client is None:
-            import boto3
+            import boto3.session
             from botocore.config import Config
-            self._bedrock_client = boto3.client(
+            # A FRESH Session per rebuild is load-bearing: boto3.client() would reuse the
+            # module-level default session, whose credential chain caches the (possibly
+            # expired) creds forever — a new Session re-reads ~/.aws/credentials.
+            self._bedrock_client = boto3.session.Session().client(
                 "bedrock-runtime",
                 region_name=self._aws_region,
                 config=Config(read_timeout=600, connect_timeout=10),
             )
         return self._bedrock_client
+
+    # Credential errors raised when the ada-managed session token in ~/.aws/credentials
+    # has rotated/expired under a long-lived client. Recreating the client re-reads the file.
+    _CRED_ERROR_CODES = {"ExpiredToken", "ExpiredTokenException", "UnrecognizedClientException", "InvalidClientTokenId"}
+
+    def _invoke_bedrock(self, model: str, body: dict) -> dict:
+        """invoke_model with credential-refresh retries: on an expired/invalid token,
+        drop the cached client (forces a re-read of ~/.aws/credentials, which ada keeps
+        fresh) and retry, waiting up to ~5 min for the refresher to land new creds."""
+        from botocore.exceptions import ClientError, NoCredentialsError
+        attempts = 10
+        for attempt in range(attempts):
+            try:
+                resp = self._bedrock().invoke_model(modelId=model, body=json.dumps(body))
+                return json.loads(resp["body"].read())
+            except (ClientError, NoCredentialsError) as e:
+                code = e.response["Error"]["Code"] if isinstance(e, ClientError) else "NoCredentials"
+                if code not in self._CRED_ERROR_CODES and not isinstance(e, NoCredentialsError):
+                    raise
+                if attempt == attempts - 1:
+                    raise
+                from loguru import logger
+                logger.warning(f"Bedrock credential error ({code}), rebuilding client and retrying "
+                               f"(attempt {attempt + 1}/{attempts})")
+                self._bedrock_client = None  # rebuild → re-read credentials file
+                time.sleep(min(30, 2 ** attempt))
 
     def complete(self, model: str, messages: list[dict], max_tokens: int = 16384) -> str:
         if self._is_bedrock(model):
@@ -127,8 +157,7 @@ class LLMClient:
             body["system"] = system
         if temperature is not None:
             body["temperature"] = temperature
-        resp = self._bedrock().invoke_model(modelId=model, body=json.dumps(body))
-        parsed = json.loads(resp["body"].read())
+        parsed = self._invoke_bedrock(model, body)
         blocks = parsed.get("content", [])
         text = "".join(b.get("text", "") for b in blocks if b.get("type") == "text")
         usage = parsed.get("usage", {})
@@ -163,5 +192,4 @@ class LLMClient:
         if system:
             body["system"] = system
 
-        resp = self._bedrock().invoke_model(modelId=model, body=json.dumps(body))
-        return json.loads(resp["body"].read())["content"][0]["text"]
+        return self._invoke_bedrock(model, body)["content"][0]["text"]

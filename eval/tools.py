@@ -2,8 +2,8 @@
 
 Tool calls are parsed by utils.agent_io.parse_tool_calls into
 {"name": <tool>, "arguments": {...}}. The http executor is shared by every actor
-(single agent, orchestrator, sub-agents); spawn/get_task_results are orchestrator-only
-and live in multi_agent.py.
+(single agent, orchestrator, sub-agents); spawn_subagent / get_queue_status /
+get_task_info / wait_task are orchestrator-only and live in multi_agent.py.
 """
 from __future__ import annotations
 

@@ -72,11 +72,18 @@ def resolve_resources(
     descriptions: dict[str, str],
     server_paths: dict[str, str],
     databases_dir: str,
+    servers_dir: str = "",
 ) -> dict[str, dict]:
-    """For each platform, resolve {description, server_path, seed_db}. Skip if missing."""
+    """For each platform, resolve {description, server_path, seed_db}. Skip if missing.
+
+    When servers_dir is given, server paths from envs.jsonl are re-rooted to
+    servers_dir/<basename> so the dataset directory can be moved freely.
+    """
     resources: dict[str, dict] = {}
     for p in platforms:
         server_path = server_paths.get(p, "")
+        if servers_dir and server_path:
+            server_path = os.path.join(servers_dir, os.path.basename(server_path))
         seed_db = os.path.join(databases_dir, f"{_safe(p)}.db")
         if not server_path or not os.path.exists(server_path):
             logger.warning(f"[{p}] server not found, skipping platform")

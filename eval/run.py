@@ -68,7 +68,7 @@ def run(cfg: EvalConfig, parallel: int = 8) -> None:
     for task in tasks:
         task_id = task.get("task_id") or task["label"]
         platforms = eval_data.task_platforms(task)
-        resources = eval_data.resolve_resources(platforms, descriptions, server_paths, cfg.databases_dir)
+        resources = eval_data.resolve_resources(platforms, descriptions, server_paths, cfg.databases_dir, cfg.servers_dir)
         verifiers = task.get("metadata", {}).get("verifiers", {})
         if not resources:
             logger.warning(f"[{task_id}] no usable platforms, skipping task")

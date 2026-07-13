@@ -1,7 +1,8 @@
 """Multi-agent eval: orchestrator (model A) + spawned sub-agents (model B).
 
-The orchestrator gets http + spawn_subagent + get_task_results. Sub-agents get
-http only and see only the description the orchestrator gives them. All actors
+The orchestrator gets http + spawn_subagent + get_queue_status + get_task_info +
+wait_task. Sub-agents get http only and see only the description the orchestrator
+gives them. All actors
 share the same live servers / X-Task-ID, and append to one EventLog (interleaved
 by real time). Sub-agent token usage is summed into a shared counter.
 """
@@ -55,6 +56,8 @@ async def run_task(
     semaphore = asyncio.Semaphore(max_concurrent)
     pending: dict[str, asyncio.Task] = {}
     results: dict[str, str] = {}
+    # tid -> {"state": waiting|running|finished|error, "actor": event-log actor tag}
+    meta: dict[str, dict] = {}
     sub_tokens = {"in": 0, "out": 0}
     sub_counter = {"n": 0}
     queue_size = {"n": 0}
@@ -64,6 +67,7 @@ async def run_task(
             async with semaphore:
                 actor = f"subagent_{sub_counter['n']}"
                 sub_counter["n"] += 1
+                meta[tid].update(state="running", actor=actor)
                 system, user = build_subagent_prompt(description, return_requirements)
                 final_text, tokens = await run_agent_loop(
                     actor, system, user, sub, http_exec, event_log, sub_max_turns,
@@ -72,13 +76,32 @@ async def run_task(
                 sub_tokens["in"] += tokens["in"]
                 sub_tokens["out"] += tokens["out"]
                 results[tid] = _extract_result(final_text)
+                meta[tid]["state"] = "finished"
         except asyncio.CancelledError:
             raise                                       # task-end cleanup — let it propagate
         except Exception as e:
             results[tid] = f"ERROR: sub-agent failed: {e}"  # never leave it stuck on "pending"
+            meta[tid]["state"] = "error"
         finally:
             queue_size["n"] -= 1        # free the queue slot
             pending.pop(tid, None)      # drop the finished task handle from the registry
+
+    def _subagent_logs(tid: str) -> list[dict]:
+        """All EventLog messages of this sub-agent, in order, unabridged."""
+        actor = meta.get(tid, {}).get("actor")
+        if not actor:
+            return []
+        logs = []
+        for ev in event_log.events:
+            if ev.get("role") not in (actor, f"{actor}:user"):
+                continue
+            entry = {"content": ev.get("content", "")}
+            if ev.get("tool_calls"):
+                entry["tool_calls"] = ev["tool_calls"]
+            if ev.get("tool_responses"):
+                entry["tool_responses"] = ev["tool_responses"]
+            logs.append(entry)
+        return logs
 
     async def orchestrator_executor(call: dict) -> str:
         name = call.get("name")
@@ -96,6 +119,7 @@ async def run_task(
             if queue_size["n"] >= max_queue:
                 return json.dumps({"error": "queue full", "max_queue": max_queue})
             tid = str(uuid.uuid4())[:8]
+            meta[tid] = {"state": "waiting", "actor": ""}
             t = asyncio.create_task(
                 _run_subagent(tid, args.get("description", ""), args.get("return_requirements", ""))
             )
@@ -103,18 +127,40 @@ async def run_task(
             queue_size["n"] += 1
             return json.dumps({"task_id": tid, "status": "started"})
 
-        if name == "get_task_results":
-            task_ids = args.get("task_ids", [])
-            blocking = bool(args.get("blocking", False))
-            timeout = float(args.get("timeout", 30))
-            if blocking:
-                waits = [pending[t] for t in task_ids if t in pending and not pending[t].done()]
-                if waits:
-                    # Wait up to `timeout`. Sub-agents not finished by then are NOT
-                    # cancelled — they keep running (bounded by sub_max_turns) and stay
-                    # "pending" for a later poll. The only place we cancel is task end.
-                    await asyncio.wait(waits, timeout=timeout)
-            out = {t: results.get(t, "pending") for t in task_ids}
+        if name == "get_queue_status":
+            out = {"running": [], "waiting": [], "finished": [], "error": []}
+            for tid, m in meta.items():
+                out[m["state"]].append(tid)
+            return json.dumps(out, ensure_ascii=False)
+
+        if name == "get_task_info":
+            tid = args.get("task_id", "")
+            if tid not in meta:
+                return json.dumps({"error": f"unknown task_id: {tid}"})
+            want_summary = bool(args.get("summary", True))
+            want_logs = bool(args.get("logs", False))
+            out: dict = {"task_id": tid, "state": meta[tid]["state"]}
+            if want_summary:
+                out["summary"] = results.get(tid, "pending")
+            if want_logs:
+                out["logs"] = _subagent_logs(tid)
+            return json.dumps(out, ensure_ascii=False)
+
+        if name == "wait_task":
+            tid = args.get("task_id", "")
+            timeout = float(args.get("timeout", 60))
+            if tid not in meta:
+                return json.dumps({"error": f"unknown task_id: {tid}"})
+            t = pending.get(tid)
+            if t is not None and not t.done():
+                # Wait up to `timeout`. A sub-agent not finished by then is NOT
+                # cancelled — it keeps running (bounded by sub_max_turns) and can be
+                # waited on again. The only place we cancel is task end.
+                await asyncio.wait([t], timeout=timeout)
+            state = meta[tid]["state"]
+            out = {"task_id": tid, "state": state}
+            if state in ("finished", "error"):
+                out["summary"] = results.get(tid, "")
             return json.dumps(out, ensure_ascii=False)
 
         return json.dumps({"error": f"unknown tool: {name}"})
