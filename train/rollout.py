@@ -18,10 +18,18 @@ from __future__ import annotations
 
 import importlib
 from copy import deepcopy
+from functools import lru_cache
 
 from slime.rollout.sglang_rollout import get_model_url
 from slime.utils.http_utils import post
+from slime.utils.processing_utils import load_tokenizer
 from slime.utils.types import Sample
+
+
+@lru_cache(maxsize=4)
+def _get_tokenizer(hf_checkpoint: str):
+    """Load (and cache) the tokenizer the way slime-n's own rollout does."""
+    return load_tokenizer(hf_checkpoint, trust_remote_code=True)
 
 from eval import data as eval_data
 from eval import multi_agent
@@ -41,14 +49,18 @@ class SlimeModelClient:
     sub instance, so ALL sub turns land in one buffer tagged with `policy_name`.
     """
 
-    def __init__(self, args, route_policy: str, tag_policy: str):
+    def __init__(self, args, route_policy: str, tag_policy: str, sampling_params: dict):
         # route_policy → which sglang engine generates (get_model_url).
         # tag_policy   → the policy_name stamped on emitted Samples (which policy learns).
         # share_model: route==tag==orch for both roles. separate: orch/sub each their own.
         self.args = args
         self.route_policy = route_policy
         self.tag_policy = tag_policy
-        self.tokenizer = args.tokenizer
+        # slime passes sampling_params into generate() (NOT on args); thread it through.
+        self.sampling_params = sampling_params
+        # L1 test passes args.tokenizer directly; slime-n rollout has no args.tokenizer
+        # → load from the policy's hf_checkpoint (cached), like slime's own rollout.
+        self.tokenizer = getattr(args, "tokenizer", None) or _get_tokenizer(args.hf_checkpoint)
         # Each item: {"prompt_ids", "response_ids", "logprobs", "prompt_text"}
         self.turns: list[dict] = []
 
@@ -61,7 +73,7 @@ class SlimeModelClient:
         prompt_ids = self.tokenizer(prompt_text, add_special_tokens=False)["input_ids"]
 
         # 2) token-level generation via the policy's sglang engine
-        sampling_params = deepcopy(args.sampling_params)
+        sampling_params = deepcopy(self.sampling_params)
         budget = args.rollout_max_context_len - len(prompt_ids)
         sampling_params["max_new_tokens"] = min(sampling_params["max_new_tokens"], max(0, budget))
         if sampling_params["max_new_tokens"] <= 0:
@@ -100,12 +112,17 @@ def _samples_from_turns(client: SlimeModelClient, reward: float, base: Sample) -
     response span as the trainable part (slime derives loss_mask from response_length).
     Outcome reward is broadcast to every turn of this policy (standard GRPO outcome RL;
     swap for per-turn shaping later)."""
+    # All turn-samples split out of ONE rollout execution must share a group_id so
+    # slime's loss reducer aggregates them as one group (averages within the rollout)
+    # instead of over-counting N. Mirror slime's default: group_id → base.index.
+    group_id = base.group_id if base.group_id is not None else base.index
     out: list[Sample] = []
     for turn in client.turns:
         if not turn["response_ids"]:
             continue
         s = deepcopy(base)
         s.policy_name = client.tag_policy
+        s.group_id = group_id
         s.prompt = turn["prompt_text"]
         s.tokens = turn["prompt_ids"] + turn["response_ids"]
         s.response = ""                      # text not needed for training; tokens are authoritative
@@ -138,11 +155,11 @@ async def generate(args, sample: Sample, sampling_params, evaluation: bool = Fal
 
     # ALWAYS two separate clients (separate buffers, so train_roles can include/exclude
     # the sub-agent independently). share_model just routes+tags both to the orch policy.
-    orch_client = SlimeModelClient(args, route_policy=cfg.orch_policy, tag_policy=cfg.orch_policy)
+    orch_client = SlimeModelClient(args, route_policy=cfg.orch_policy, tag_policy=cfg.orch_policy, sampling_params=sampling_params)
     if cfg.share_model:
-        sub_client = SlimeModelClient(args, route_policy=cfg.orch_policy, tag_policy=cfg.orch_policy)
+        sub_client = SlimeModelClient(args, route_policy=cfg.orch_policy, tag_policy=cfg.orch_policy, sampling_params=sampling_params)
     else:
-        sub_client = SlimeModelClient(args, route_policy=cfg.sub_policy, tag_policy=cfg.sub_policy)
+        sub_client = SlimeModelClient(args, route_policy=cfg.sub_policy, tag_policy=cfg.sub_policy, sampling_params=sampling_params)
 
     seed = (sample.index or 0)
     traj = await multi_agent.run_task(

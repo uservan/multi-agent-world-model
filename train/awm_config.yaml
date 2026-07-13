@@ -1,0 +1,12 @@
+# AWM rollout config for slime-n's --custom-config-path (YAML, NOT the .py).
+# slime-n does: yaml.safe_load(file) -> setattr(args, k, v) for each top-level key.
+# So the top-level `custom_config:` key becomes args.custom_config (a dict), which
+# train/rollout.py:load_awm_config() turns into an AWMConfig. Only the fields you
+# want to OVERRIDE need to appear here; everything else uses AWMConfig() defaults.
+#
+# The 3 resource paths are made ABSOLUTE so the rollout works regardless of the
+# ray worker's cwd (relative paths would break outside PROJECT_ROOT).
+custom_config:
+  platforms_input: /shared/dedicated-fsx-data-repo-training-gl-eks-us-west-2/home/jwanyang/multi-agent-world-model/outputs/platforms.jsonl
+  envs_input:      /shared/dedicated-fsx-data-repo-training-gl-eks-us-west-2/home/jwanyang/multi-agent-world-model/outputs/generated_new/envs_fixed.jsonl
+  databases_dir:   /shared/dedicated-fsx-data-repo-training-gl-eks-us-west-2/home/jwanyang/multi-agent-world-model/outputs/generated_new/databases

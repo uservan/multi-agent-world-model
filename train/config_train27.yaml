@@ -1,0 +1,75 @@
+# L3 TRAIN config — full GRPO training step on Qwen3.6-27B (rollout + reward + weight update).
+# Same policy/megatron/sglang shape as config_debug27.yaml, but this one is run WITHOUT
+# --debug-rollout-only, so the megatron actor is real (builds model via mbridge from
+# hf_checkpoint, computes GRPO loss, updates weights, syncs back to sglang).
+#
+# GPU layout (single node, 8 GPUs, NON-colocate): actor(megatron tp4×pp1=4) on 4 GPUs,
+# sglang(tp4) on the other 4. This is the exact placement L2 ran (proven).
+
+policies:
+
+  - name: orchestrator
+    role: actor
+
+    hf_checkpoint: /tmp/instance_storage/models/Qwen3.6-27B   # local fast disk (sglang serve + mbridge source)
+    ref_load: /tmp/instance_storage/models/Qwen3.6-27B        # bridge mode: load falls back here (HF weights) on first run
+    load: /shared/dedicated-fsx-data-repo-training-gl-eks-us-west-2/home/jwanyang/multi-agent-world-model/save/qwen3.6-27b/model   # resume dir (absent on first run → falls back to ref_load)
+    save: /shared/dedicated-fsx-data-repo-training-gl-eks-us-west-2/home/jwanyang/multi-agent-world-model/save/qwen3.6-27b/model   # weight checkpoint dir
+
+    buffer_mode: split
+
+    num_gpus_per_node: 4          # actor(4) + sglang(4) = 8 on one node (non-colocate)
+    megatron_num_nodes: 1
+    sglang_num_nodes: 1
+
+    megatron:
+      megatron_to_hf_mode: bridge
+      tensor_model_parallel_size: 4
+      pipeline_model_parallel_size: 1     # tp4×pp1=4 == num_gpus_per_node
+      context_parallel_size: 1
+      expert_model_parallel_size: 1
+      expert_tensor_parallel_size: 1
+
+      recompute_granularity: full
+      recompute_method: uniform
+      recompute_num_layers: 1
+
+      attention_dropout: 0.0
+      hidden_dropout: 0.0
+      accumulate_allreduce_grads_in_fp32: true
+      attention_softmax_in_fp32: true
+
+      micro_batch_size: 1
+      global_batch_size: 2          # smoke: train_iters = num_rollout(1)*batch(1)*n_samples(2)//gbs must be ≥1
+      use_dynamic_batch_size: true
+      max_tokens_per_gpu: 16384
+
+      optimizer: adam
+      lr: 1.0e-6
+      lr_decay_style: constant
+      weight_decay: 0.1
+      adam_beta1: 0.9
+      adam_beta2: 0.98
+      optimizer_cpu_offload: true
+      overlap_cpu_optimizer_d2h_h2d: true
+      use_precision_aware_optimizer: true
+
+      save_interval: 100
+
+      advantage_estimator: grpo
+      n_samples_per_prompt: 2       # small GRPO group (match CLI --n-samples-per-prompt)
+      eps_clip: 0.2
+      kl_coef: 0
+      use_kl_loss: false
+      kl_loss_coef: 0
+
+    sglang:
+      update_weights: true
+      num_gpus_per_engine: 4        # tp4 on the 4 rollout GPUs
+      mem_fraction_static: 0.8
+      chunked_prefill_size: 4096
+      max_running_requests: 256
+      log_level: info
+      server_groups:
+        - worker_type: regular
+          num_gpus: 4               # must equal sglang_num_nodes(1) × num_gpus_per_node(4)
