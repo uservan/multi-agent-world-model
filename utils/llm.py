@@ -150,12 +150,18 @@ class LLMClient:
                 filtered.append(msg)
         body: dict = {
             "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": max_tokens,
+            "max_tokens": self._floor_max_tokens(max_tokens),
             "messages": filtered,
         }
         if system:
             body["system"] = system
-        if temperature is not None:
+        # Config passthrough, same contract as the OpenAI path: llm_params merge verbatim
+        # into the request body (temperature, top_k, thinking, ...), so e.g. extended
+        # thinking is enabled purely via config:
+        #   orch_llm_params: {temperature: 1.0, thinking: {type: enabled, budget_tokens: N}}
+        # ("extra_body" is an OpenAI-client envelope — skip it here.)
+        body.update({k: v for k, v in self._llm_params.items() if k != "extra_body"})
+        if temperature is not None and "temperature" not in self._llm_params:
             body["temperature"] = temperature
         parsed = self._invoke_bedrock(model, body)
         blocks = parsed.get("content", [])

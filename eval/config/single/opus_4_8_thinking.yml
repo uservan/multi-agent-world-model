@@ -1,0 +1,35 @@
+# Single-agent eval — Claude Opus 4.8 via AWS Bedrock, extended thinking ON.
+# Model ids starting with "us.anthropic." are auto-routed to bedrock-runtime (boto3):
+# no api_key / base_url needed — credentials come from ~/.aws/credentials, which the
+# ada refresh loop keeps fresh (the client auto-rebuilds on expired-token errors).
+# Costs are $/token — update to the current pricing of the model you pick.
+mode: single
+
+orch_model: us.anthropic.claude-opus-4-8
+orch_api_key: null
+orch_base_url: null
+orch_input_cost: 5.0e-06      # $5 / 1M input tokens — check current pricing
+orch_output_cost: 2.5e-05     # $25 / 1M output tokens
+orch_llm_params:
+  # Reasoning: Opus 4.8 uses adaptive thinking + effort (the old
+  # {type: enabled, budget_tokens} form is rejected by this model). Both keys are
+  # merged verbatim into the Bedrock request body. effort: low | medium | high.
+  # Note: the model returns thinking blocks ENCRYPTED (signature only, no plain
+  # text), so trajectories won't contain readable reasoning — but usage reports
+  # thinking_tokens and they count toward output tokens / max_tokens.
+  thinking:
+    type: adaptive
+  output_config:
+    effort: high
+
+n: 5
+base_seed: 42
+temperature: 1.0
+max_completion_tokens: 16384
+min_completion_tokens: 65536
+max_turns: 200
+
+# Data sources — one root, everything derived (verified/task_final.jsonl,
+# platforms.jsonl, envs.jsonl, databases/, servers/).
+data_root: outputs/test_gen_by_claude
+eval_root: outputs/new_eval/opus-4-8-thinking

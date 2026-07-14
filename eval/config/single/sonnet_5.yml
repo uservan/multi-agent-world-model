@@ -12,8 +12,17 @@ orch_input_cost: 3.0e-06      # $3 / 1M input tokens — check current pricing
 orch_output_cost: 1.5e-05     # $15 / 1M output tokens
 orch_llm_params:
   temperature: 1.0
+  # Reasoning: adaptive thinking + effort (same interface as Opus 4.8; the old
+  # {type: enabled, budget_tokens} form is rejected). Merged verbatim into the
+  # Bedrock request body. effort: low | medium | high. Thinking blocks come back
+  # ENCRYPTED (signature only) so trajectories won't contain readable reasoning,
+  # but usage reports thinking_tokens and they count toward output / max_tokens.
+  thinking:
+    type: adaptive
+  output_config:
+    effort: high
 
-n: 5
+n: 3
 base_seed: 42
 temperature: 1.0
 max_completion_tokens: 16384
@@ -23,4 +32,4 @@ max_turns: 200
 # Data sources — one root, everything derived (verified/task_final.jsonl,
 # platforms.jsonl, envs.jsonl, databases/, servers/).
 data_root: outputs/test_gen_by_claude
-eval_root: outputs/new_eval/eval_gen_claude
+eval_root: outputs/new_eval/sonnet-5
