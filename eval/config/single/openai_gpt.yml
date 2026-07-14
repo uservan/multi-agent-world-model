@@ -1,0 +1,27 @@
+# Single-agent eval — OpenAI closed-source model via the official API.
+# Fill in orch_api_key (or export OPENAI_API_KEY and leave it null).
+# Costs are $/token — update to the current pricing of the model you pick.
+mode: single
+
+orch_model: gpt-5.2
+orch_api_key: sk-REPLACE_ME
+orch_base_url: https://api.openai.com/v1
+orch_input_cost: 1.25e-06     # $1.25 / 1M input tokens — check current pricing
+orch_output_cost: 1.0e-05     # $10.00 / 1M output tokens
+orch_llm_params:
+  temperature: 1.0
+  # Reasoning-effort passthrough (supported values depend on the model; delete if unused):
+  # extra_body:
+  #   reasoning_effort: medium
+
+n: 5
+base_seed: 42
+temperature: 1.0
+max_completion_tokens: 16384
+min_completion_tokens: 65536
+max_turns: 200
+
+# Data sources — one root, everything derived (verified/task_final.jsonl,
+# platforms.jsonl, envs.jsonl, databases/, servers/).
+data_root: outputs/test_gen_by_claude   # or: outputs/eval_gen_claude (paths are cwd-relative — run from repo root)
+eval_root: outputs/new_eval/eval_gen_claude

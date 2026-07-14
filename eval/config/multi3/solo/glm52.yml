@@ -36,8 +36,5 @@ max_queue: 16
 orch_style: solo
 
 # Data sources
-task_final: outputs/generated_new/verified/task_final.jsonl
-platforms_input: outputs/platforms.jsonl
-envs_input: outputs/generated_new/envs_fixed.jsonl
-databases_dir: outputs/generated_new/databases
+data_root: outputs/generated_new   # derives task_final / platforms / envs / databases / servers
 eval_root: outputs/eval/generated_new_200_solo
