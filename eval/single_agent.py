@@ -5,7 +5,7 @@ import random
 
 from loguru import logger
 
-from eval.agent import EventLog, ModelClient, run_agent_loop
+from eval.agent import EventLog, ModelClient, error_info, run_agent_loop, status_for
 from eval.platform import PlatformRuntime
 from eval.prompts import build_single_agent_prompt
 from eval.scorer import score_task
@@ -46,10 +46,13 @@ async def run_task(
                 "agent", system, user, orch, executor, event_log, max_turns,
             )
         except Exception as e:
-            # Agent loop crashed (e.g. context-length overflow). Don't drop the run —
-            # score whatever it managed to do against the DB and record acc + error.
-            agent_error = str(e)
-            logger.warning(f"[{task_id}] agent loop failed, scoring partial state: {e}")
+            # Agent loop crashed. Don't drop the run — score whatever it managed to do
+            # against the DB and record acc + a classified error. Transient failures
+            # (timeout/503/…) yield status="error" (re-run, uncounted); deterministic
+            # ones (e.g. context-length overflow) stay "complete" and are scored once.
+            agent_error = error_info(e)
+            logger.warning(f"[{task_id}] agent loop failed ({agent_error['class']}), "
+                           f"scoring partial state: {agent_error['type']}: {agent_error['message']}")
 
         verifier_results, acc = score_task(runtime, verifiers, task_id)
     finally:
@@ -60,7 +63,7 @@ async def run_task(
         "run_idx": None,                 # filled by caller
         "seed": seed,
         "mode": "single",
-        "status": "complete",
+        "status": status_for(agent_error),
         "events": event_log.events,
         "verifier_results": verifier_results,
         "acc": acc,

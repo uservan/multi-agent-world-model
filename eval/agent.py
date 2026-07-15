@@ -9,12 +9,57 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import threading
 import time
 from dataclasses import dataclass, field
 
 from utils.agent_io import parse_tool_calls_detailed
 from utils.llm import LLMClient
+
+
+# ── Error classification ─────────────────────────────────────────────────────────
+# Transient (infra) failures — server overload / request timeouts / rate limits — are
+# NOT the model's fault. Trajectories that end in a transient error are marked
+# status="error" so they are neither cached on --config resume (eval/run.py) nor
+# counted in eval.json (eval/scorer.py): i.e. they auto-retry on the next run.
+# Deterministic failures (e.g. context-length overflow) reproduce every time, so they
+# stay status="complete" and are scored once — excluding them would inflate acc
+# (survivorship bias) and they would never converge across repeated resumes.
+_TRANSIENT_TYPES = {
+    "APITimeoutError", "APIConnectionError", "RateLimitError", "InternalServerError",
+    "ServiceUnavailableError", "TimeoutError", "ReadTimeout", "ConnectTimeout",
+    "ConnectionError", "Timeout",
+}
+_TRANSIENT_PAT = re.compile(
+    r"timed out|timeout|connection (?:error|aborted|reset|refused)|"
+    r"rate.?limit|too many requests|\b429\b|\b50[0234]\b|"
+    r"service unavailable|overloaded|temporarily unavailable",
+    re.IGNORECASE,
+)
+
+
+def classify_error(exc: BaseException) -> str:
+    """'transient' (retryable infra error) or 'deterministic' (reproducible failure)."""
+    if type(exc).__name__ in _TRANSIENT_TYPES:
+        return "transient"
+    if getattr(exc, "status_code", None) in (429, 500, 502, 503, 504):
+        return "transient"
+    if _TRANSIENT_PAT.search(str(exc) or ""):
+        return "transient"
+    return "deterministic"
+
+
+def error_info(exc: BaseException) -> dict:
+    """Structured record for a trajectory's `error` field."""
+    return {"class": classify_error(exc), "type": type(exc).__name__, "message": str(exc)}
+
+
+def status_for(error: dict | None) -> str:
+    """'complete' unless the failure was transient (then 'error' → re-run, not counted)."""
+    if error and error.get("class") == "transient":
+        return "error"
+    return "complete"
 
 
 # Nudge when a turn produced neither a tool call nor <done> (e.g. a thinking model

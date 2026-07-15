@@ -16,7 +16,7 @@ import uuid
 
 from loguru import logger
 
-from eval.agent import EventLog, ModelClient, run_agent_loop
+from eval.agent import EventLog, ModelClient, error_info, run_agent_loop, status_for
 from eval.platform import PlatformRuntime
 from eval.prompts import build_orchestrator_prompt, build_subagent_prompt, SUBAGENT_SUMMARY_PROMPT
 from eval.scorer import score_task
@@ -181,10 +181,13 @@ async def run_task(
                 "orchestrator", system, user, orch, orchestrator_executor, event_log, max_turns,
             )
         except Exception as e:
-            # Orchestrator crashed (e.g. context-length overflow). Don't drop the run —
-            # score whatever was accomplished against the DB and record acc + error.
-            agent_error = str(e)
-            logger.warning(f"[{task_id}] orchestrator loop failed, scoring partial state: {e}")
+            # Orchestrator crashed. Don't drop the run — score whatever was accomplished
+            # against the DB and record acc + a classified error. Transient failures
+            # (timeout/503/…) yield status="error" (re-run, uncounted); deterministic
+            # ones (e.g. context-length overflow) stay "complete" and are scored once.
+            agent_error = error_info(e)
+            logger.warning(f"[{task_id}] orchestrator loop failed ({agent_error['class']}), "
+                           f"scoring partial state: {agent_error['type']}: {agent_error['message']}")
 
         # Cancel any sub-agents still running
         for t in pending.values():
@@ -202,7 +205,7 @@ async def run_task(
         "run_idx": None,
         "seed": seed,
         "mode": "multi",
-        "status": "complete",
+        "status": status_for(agent_error),
         "events": event_log.events,
         "verifier_results": verifier_results,
         "error": agent_error,
