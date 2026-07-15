@@ -2,7 +2,8 @@
 
 Agents are given only the goal + a shuffled list of available platforms (name,
 description, base_url). No scene order, no task_operations — the agent plans
-everything itself and discovers each API via GET /openapi.json.
+everything itself and discovers each API via GET /openapi.json (two-step: a
+compact index first, then per-endpoint details on demand — see eval/tools.py).
 """
 from __future__ import annotations
 
@@ -43,7 +44,11 @@ Alternatively, you may emit the call as a single JSON object inside the same <to
 - method is one of GET/POST/PUT/PATCH/DELETE.
 - params is a JSON object: for GET/DELETE it is the query-string parameters; for POST/PUT/PATCH it is the JSON body. Use {} if there are none.
 - The X-Task-ID header is injected automatically — do not include it.
-- First call for each platform you use: GET /openapi.json to discover its exact endpoints and parameters. Never guess paths."""
+
+Discover each platform's API in TWO steps (never guess paths or parameters):
+1. GET /openapi.json with params {} → a compact INDEX of that platform: one line per endpoint (METHOD /path — summary). No parameters or schemas, so it stays small even for large platforms.
+2. When you are ready to call specific endpoints, GET /openapi.json again with params {"paths": ["/first", "/second"]} (or {"path": "/single"}) → the full details (path/query params, request body fields, response fields, with types and which are required) for ONLY those endpoints.
+Do NOT try to load a whole platform's full spec at once — pull the index first, then fetch details just for the endpoints you actually use."""
 
 
 def build_single_agent_prompt(goal: str, platform_map: dict[str, dict]) -> tuple[str, str]:
@@ -303,7 +308,7 @@ Use whichever format you find more reliable — the same one as your http calls.
         + "  - Each sub-agent starts fresh — it cannot see your conversation, the platform list, or what "
         + "other sub-agents did. Make every description self-contained: the exact platform URL(s), any "
         + "IDs/values you have ALREADY discovered, the subtask GOAL (not every API call — it has the http "
-        + "tool and discovers endpoints via GET /openapi.json), and what to report back.\n"
+        + "tool and discovers endpoints via GET /openapi.json: index first, then per-endpoint details), and what to report back.\n"
         + "  - After spawning parallel sub-agents, keep making progress yourself while they run; check "
         + "get_queue_status / get_task_info to see how they are doing, and wait_task only when you need a "
         + "result to continue.\n"

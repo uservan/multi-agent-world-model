@@ -9,7 +9,7 @@ orch_output_cost: 1.0e-06
 orch_llm_params:
   temperature: 0.6
 
-n: 5
+n: 3
 base_seed: 42
 temperature: 0.6
 max_completion_tokens: 16384
@@ -17,5 +17,5 @@ min_completion_tokens: 65536
 max_turns: 200   # episode ends ONLY on <done> or this cap
 
 # Data sources
-data_root: outputs/generated_new   # derives task_final / platforms / envs / databases / servers
-eval_root: outputs/eval/generated_new_200
+data_root: outputs/test_gen_by_claude   # derives task_final / platforms / envs / databases / servers
+eval_root: outputs/new_eval/qwen35-35b_single

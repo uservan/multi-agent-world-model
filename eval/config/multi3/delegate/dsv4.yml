@@ -4,8 +4,8 @@ mode: multi
 orch_model: DeepSeek-V4-Pro
 orch_api_key: EMPTY
 orch_base_url: http://127.0.0.1:30000/v1
-orch_input_cost: null
-orch_output_cost: null
+orch_input_cost: 4.35e-07    # $0.435 / 1M tokens
+orch_output_cost: 8.7e-07    # $0.87 / 1M tokens
 orch_llm_params:
   extra_body:
     chat_template_kwargs:
@@ -15,15 +15,15 @@ orch_llm_params:
 sub_model: DeepSeek-V4-Pro
 sub_api_key: EMPTY
 sub_base_url: http://127.0.0.1:30000/v1
-sub_input_cost: null
-sub_output_cost: null
+sub_input_cost: 4.35e-07     # $0.435 / 1M tokens
+sub_output_cost: 8.7e-07     # $0.87 / 1M tokens
 sub_llm_params:
   extra_body:
     chat_template_kwargs:
       thinking: true
   temperature: 1.0
 
-n: 5
+n: 3
 base_seed: 42
 temperature: 1.0
 max_completion_tokens: 16384
@@ -35,5 +35,5 @@ max_queue: 16
 orch_style: delegate
 
 # Data sources
-data_root: outputs/generated_new   # derives task_final / platforms / envs / databases / servers
-eval_root: outputs/eval/generated_new_200_delegate
+data_root: outputs/test_gen_by_claude   # derives task_final / platforms / envs / databases / servers
+eval_root: outputs/new_eval/dsv4_delegate

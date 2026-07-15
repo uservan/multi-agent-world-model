@@ -1,23 +1,13 @@
-# Multi-agent eval — DeepSeek-V4-Pro (thinking), orch_style=solo
-mode: multi
+# Single-agent eval — one model does everything.   model: DeepSeek-V4-Pro (thinking)
+mode: single
 
 orch_model: DeepSeek-V4-Pro
 orch_api_key: EMPTY
 orch_base_url: http://127.0.0.1:30000/v1
 orch_input_cost: 4.35e-07    # $0.435 / 1M tokens
 orch_output_cost: 8.7e-07    # $0.87 / 1M tokens
+# DeepSeek-V4 thinking mode: server splits <think> into reasoning_content only when enabled.
 orch_llm_params:
-  extra_body:
-    chat_template_kwargs:
-      thinking: true
-  temperature: 1.0
-
-sub_model: DeepSeek-V4-Pro
-sub_api_key: EMPTY
-sub_base_url: http://127.0.0.1:30000/v1
-sub_input_cost: 4.35e-07     # $0.435 / 1M tokens
-sub_output_cost: 8.7e-07     # $0.87 / 1M tokens
-sub_llm_params:
   extra_body:
     chat_template_kwargs:
       thinking: true
@@ -28,12 +18,8 @@ base_seed: 42
 temperature: 1.0
 max_completion_tokens: 16384
 min_completion_tokens: 65536
-max_turns: 200
-sub_max_turns: 200
-max_concurrent: 4
-max_queue: 16
-orch_style: solo
+max_turns: 200   # episode ends ONLY on model's <done> or hitting this cap
 
 # Data sources
 data_root: outputs/test_gen_by_claude   # derives task_final / platforms / envs / databases / servers
-eval_root: outputs/new_eval/dsv4_solo
+eval_root: outputs/new_eval/dsv4_single

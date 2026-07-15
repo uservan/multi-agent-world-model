@@ -20,7 +20,7 @@ sub_output_cost: null
 sub_llm_params:
   temperature: 1.0
 
-n: 5
+n: 3
 base_seed: 42
 temperature: 1.0
 max_completion_tokens: 16384
@@ -32,5 +32,5 @@ max_queue: 16
 orch_style: solo
 
 # Data sources
-data_root: outputs/generated_new   # derives task_final / platforms / envs / databases / servers
-eval_root: outputs/eval/generated_new_200_solo
+data_root: outputs/test_gen_by_claude   # derives task_final / platforms / envs / databases / servers
+eval_root: outputs/new_eval/kimi26_solo

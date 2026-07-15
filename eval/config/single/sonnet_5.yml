@@ -32,4 +32,4 @@ max_turns: 200
 # Data sources — one root, everything derived (verified/task_final.jsonl,
 # platforms.jsonl, envs.jsonl, databases/, servers/).
 data_root: outputs/test_gen_by_claude
-eval_root: outputs/new_eval/sonnet-5
+eval_root: outputs/new_eval/sonnet_5_single
