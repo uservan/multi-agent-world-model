@@ -4,9 +4,21 @@
 # train/rollout.py:load_awm_config() turns into an AWMConfig. Only the fields you
 # want to OVERRIDE need to appear here; everything else uses AWMConfig() defaults.
 #
-# The 3 resource paths are made ABSOLUTE so the rollout works regardless of the
-# ray worker's cwd (relative paths would break outside PROJECT_ROOT).
+# Eval-style: give ONLY the dataset root (ABSOLUTE, so the rollout works regardless
+# of the ray worker's cwd). AWMConfig.__post_init__ derives platforms.jsonl /
+# envs.jsonl / databases / servers under it; server files are re-rooted to
+# <data_root>/servers by basename (envs.jsonl's recorded dir is ignored).
 custom_config:
-  platforms_input: /shared/dedicated-fsx-data-repo-training-gl-eks-us-west-2/home/jwanyang/multi-agent-world-model/outputs/platforms.jsonl
-  envs_input:      /shared/dedicated-fsx-data-repo-training-gl-eks-us-west-2/home/jwanyang/multi-agent-world-model/outputs/generated_new/envs_fixed.jsonl
-  databases_dir:   /shared/dedicated-fsx-data-repo-training-gl-eks-us-west-2/home/jwanyang/multi-agent-world-model/outputs/generated_new/databases
+  data_root: /shared/dedicated-fsx-data-repo-training-gl-eks-us-west-2/home/jwanyang/multi-agent-world-model/outputs/test_gen_by_claude
+  # Train ONLY the orchestrator's own tokens. share_model=True means one policy
+  # (orchestrator) generates both orchestrator turns AND sub-agent turns, but with
+  # train_roles=["orch"] only the orchestrator-role tokens are emitted as training
+  # samples — the sub-agent still runs (provides the environment) but its tokens are
+  # NOT trained. (Add "sub" here later to co-train the sub-agent.)
+  share_model: true
+  train_roles: ["orch"]
+  # Cap turns so the orchestrator can't ramble to the 200-turn default (which pushed some
+  # trajectories to 44K tokens and made generation take 2h+). With the 32K context cap this
+  # is the practical bound; 40 turns is plenty for these 2-platform tasks.
+  max_turns: 40
+  sub_max_turns: 40

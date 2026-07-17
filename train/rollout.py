@@ -149,7 +149,8 @@ async def generate(args, sample: Sample, sampling_params, evaluation: bool = Fal
     # mount platform servers + seed DBs exactly like eval does
     descriptions = eval_data.load_platform_descriptions(cfg.platforms_input)
     server_paths = eval_data.load_server_paths(cfg.envs_input)
-    resources = eval_data.resolve_resources(platforms, descriptions, server_paths, cfg.databases_dir)
+    resources = eval_data.resolve_resources(
+        platforms, descriptions, server_paths, cfg.databases_dir, servers_dir=cfg.servers_dir)
     if not resources:
         return []
 

@@ -168,8 +168,16 @@ async def run_task(
     try:
         # All-or-nothing: every platform must come up, else skip this run entirely
         # (a partial platform set would make scoring meaningless).
-        for p in platforms:
-            if not runtime.start(p, resources[p]):
+        # runtime.start() is SYNC and blocks up to wait_for_server's timeout. Calling
+        # it in a bare loop from this async coroutine freezes the whole asyncio event
+        # loop — stalling sglang generation and every other concurrent rollout sample,
+        # which under RL load pushes platform startup past its timeout (false failures).
+        # Start them concurrently in threads so the event loop keeps running.
+        start_results = await asyncio.gather(
+            *(asyncio.to_thread(runtime.start, p, resources[p]) for p in platforms)
+        )
+        for p, ok in zip(platforms, start_results):
+            if not ok:
                 raise RuntimeError(f"platform failed to start: {p}")
 
         system, user = build_orchestrator_prompt(

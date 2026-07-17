@@ -38,9 +38,24 @@ class AWMConfig:
     reward_kwargs: dict = field(default_factory=dict)     # extra knobs for the chosen form
 
     # ── Environment / resource bundle (same files eval uses for scoring) ─────
+    # Preferred: set `data_root` only (eval-style); the four resource paths below are
+    # derived from it in __post_init__ (platforms.jsonl / envs.jsonl / databases /
+    # servers under the root). server paths get re-rooted to <data_root>/servers via
+    # `servers_dir`, so we ignore whatever directory envs.jsonl records — only its
+    # basename is used. Leave data_root empty to set the paths explicitly instead.
+    data_root: str = ""
     platforms_input: str = "outputs/platforms.jsonl"
     envs_input: str = "outputs/generated_new/envs_fixed.jsonl"
     databases_dir: str = "outputs/generated_new/databases"
+    servers_dir: str = ""                # re-root server files here (eval-style); "" = use envs.jsonl paths
+
+    def __post_init__(self):
+        if self.data_root:
+            r = self.data_root.rstrip("/")
+            self.platforms_input = f"{r}/platforms.jsonl"
+            self.envs_input = f"{r}/envs.jsonl"
+            self.databases_dir = f"{r}/databases"
+            self.servers_dir = f"{r}/servers"
 
 
 # slime loads this module by path and looks for a module-level `AWM` (a dict) or a

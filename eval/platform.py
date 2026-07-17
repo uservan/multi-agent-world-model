@@ -30,9 +30,28 @@ class PlatformRuntime:
         copy_seed_db(resource["seed_db"], final_db)
 
         proc, port = start_server(resource["server_path"], final_db)
-        if not wait_for_server(port, timeout=25):
+        # 120s (was 25s): during colocate RL rollout many platform servers start
+        # concurrently (n_samples × platforms-per-task) while sglang generates on the
+        # same node, so CPU contention pushes FastAPI/uvicorn startup well past 25s.
+        if not wait_for_server(port, timeout=120):
+            # Surface the child's captured output to tell a crash apart from a slow start.
+            crashed = proc.poll() is not None
+            # Is the port actually bound? (distinguishes "never bound" from "bound but /docs slow")
+            import socket as _sock
+            with _sock.socket(_sock.AF_INET, _sock.SOCK_STREAM) as _s:
+                _s.settimeout(1)
+                port_open = _s.connect_ex(("127.0.0.1", port)) == 0
+            out = ""
+            if crashed and proc.stdout is not None:
+                try:
+                    out = proc.stdout.read(4000).decode("utf-8", "replace")
+                except Exception:
+                    out = "<unreadable>"
             stop_server(proc)
-            logger.warning(f"[{self.task_id}::{platform}] server failed to start")
+            logger.warning(
+                f"[{self.task_id}::{platform}] server failed to start "
+                f"({'crashed' if crashed else 'timeout, still running'}, port_open={port_open}) output:\n{out}"
+            )
             return False
 
         self.platforms[platform] = {

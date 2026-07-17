@@ -12,9 +12,9 @@ export PYTHONUNBUFFERED=1
 unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY
 
 MASTER_ADDR=${MASTER_ADDR:?set MASTER_ADDR to this node IP}
-ACTOR_NUM_NODES=${ACTOR_NUM_NODES:-1}
-ACTOR_NUM_GPUS_PER_NODE=${ACTOR_NUM_GPUS_PER_NODE:-4}   # matches config num_gpus_per_node=4 (actor trains on 4)
-RAY_NUM_GPUS=${RAY_NUM_GPUS:-8}                          # total GPUs ray manages (actor 4 + sglang 4)
+ACTOR_NUM_NODES=${ACTOR_NUM_NODES:-2}                   # both nodes
+ACTOR_NUM_GPUS_PER_NODE=${ACTOR_NUM_GPUS_PER_NODE:-8}   # matches config num_gpus_per_node=8 → 2×8=16 GPU, tp4×dp4
+RAY_NUM_GPUS=${RAY_NUM_GPUS:-16}                         # total GPUs ray manages across both nodes (colocate)
 RAY_DASH_PORT=${RAY_DASH_PORT:-8266}
 
 PROJECT_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." &>/dev/null && pwd)"
@@ -52,15 +52,19 @@ source "${SLIME_DIR}/scripts/models/qwen3.5-27B.sh"     # → MODEL_ARGS[]
 ROLLOUT_ARGS=(
    --custom-generate-function-path train.rollout.generate
    --custom-config-path            "${PROJECT_ROOT}/train/awm_config.yaml"
-   --prompt-data  "${PROJECT_ROOT}/outputs/generated_new/verified/task_final.jsonl"
+   --prompt-data  "${PROJECT_ROOT}/outputs/test_gen_by_claude/verified/task_final.jsonl"
    --input-key  prompt
    --label-key  label
    --apply-chat-template
    --rollout-shuffle
-   --num-rollout              1          # L3: a single train step (1 rollout → 1 weight update)
-   --rollout-batch-size       1          # one task
-   --n-samples-per-prompt     2          # tiny GRPO group
-   --rollout-max-context-len  131072
+   --num-rollout              2          # L3: bridge-mode fresh load reports loaded_rollout_id=0 →
+                                         # start_rollout_id=1, and slime's loop is range(start, num_rollout).
+                                         # num_rollout=1 → range(1,1)=∅ (no train step!). num_rollout=2 →
+                                         # range(1,2)=[1] → exactly one real rollout+GRPO step.
+   --rollout-batch-size       8          # 8 prompts/tasks per rollout step
+   --n-samples-per-prompt     8          # GRPO group size = 8 (→ 8×8 = 64 trajectories/step)
+   --rollout-max-context-len  32768      # cap total trajectory length at 32K (was 128K → some rambled to 44K).
+                                         # trained via tp4×cp4: 32K sequence → 8K/GPU.
    --rollout-max-response-len 8192
    --rollout-temperature      1.0
    --balance-data
@@ -68,6 +72,15 @@ ROLLOUT_ARGS=(
 
 TRAIN_ARGS=(
    --config "${PROJECT_ROOT}/train/config_train27.yaml"   # 27B, full training (actor real)
+   --qkv-format bshd                                      # non-packed layout: megatron's GDN (gated-delta-net)
+                                                          # layers reject packed sequences (qkv_format=thd);
+                                                          # bshd requires use_dynamic_batch_size=false (set in config).
+   --colocate                                             # actor+sglang share the 4 GPUs (time-shared via
+                                                          # auto offload); routes weight-sync through the
+                                                          # megatron-bridge weight iterator (correct for this
+                                                          # VLM/GDN checkpoint — the non-colocate distributed
+                                                          # path uses a hand-written converter that lacks the
+                                                          # bridge-built vision_model.* / language_model.* naming).
    --dump-details "${PROJECT_ROOT}/save/qwen3.6-27b/rollout"
 )
 

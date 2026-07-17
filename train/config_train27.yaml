@@ -18,15 +18,22 @@ policies:
 
     buffer_mode: split
 
-    num_gpus_per_node: 4          # actor(4) + sglang(4) = 8 on one node (non-colocate)
-    megatron_num_nodes: 1
-    sglang_num_nodes: 1
+    num_gpus_per_node: 8          # both nodes fully used: 2 nodes × 8 = 16 GPU (colocate)
+    megatron_num_nodes: 2         # actor across 2 nodes: tp4 × dp4 = 16 GPU
+    sglang_num_nodes: 2           # sglang across 2 nodes: 16 GPU / tp4 = 4 engines
 
     megatron:
       megatron_to_hf_mode: bridge
       tensor_model_parallel_size: 4
-      pipeline_model_parallel_size: 1     # tp4×pp1=4 == num_gpus_per_node
-      context_parallel_size: 1
+      pipeline_model_parallel_size: 1
+      # tp4 × cp4 × pp1 = 16 = all GPUs → dp=1. TWO reasons for context-parallel (cp) here:
+      #  (1) The multi-agent rollout emits ONE training sample per orchestrator turn, so the
+      #      per-rollout sample count is variable (e.g. 1150) and rarely divisible by dp_size.
+      #      GDN forbids sequence packing (use_dynamic_batch_size=false → static dp schedule,
+      #      which requires num_mbs % (dp_size·mb_group) == 0). dp=1 removes that constraint.
+      #  (2) cp splits each long sequence across 4 GPUs (a 32K trajectory → 8K/GPU), which keeps
+      #      the huge-vocab (248320) logits from OOMing on a single tp4 group.
+      context_parallel_size: 4
       expert_model_parallel_size: 1
       expert_tensor_parallel_size: 1
 
@@ -40,8 +47,13 @@ policies:
       attention_softmax_in_fp32: true
 
       micro_batch_size: 1
-      global_batch_size: 2          # smoke: train_iters = num_rollout(1)*batch(1)*n_samples(2)//gbs must be ≥1
-      use_dynamic_batch_size: true
+      global_batch_size: 64         # = rollout_batch_size(8) × n_samples(8) = 64 trajectories → 1 optim step/rollout
+                                    # (divisible by dp=4 → 16 micro-batches per dp rank)
+      # This Qwen3.5 hybrid model has GDN (gated-delta-net / linear-attention) layers,
+      # and megatron's GDN forward raises "does not support packed sequence". Dynamic
+      # batching packs sequences (qkv_format=thd) → must be OFF, paired with
+      # --qkv-format bshd (non-packed) + micro_batch_size, so packed_seq_params is None.
+      use_dynamic_batch_size: false
       max_tokens_per_gpu: 16384
 
       optimizer: adam
@@ -56,8 +68,14 @@ policies:
 
       save_interval: 100
 
+      # Required by the Qwen3-VL bridge whenever context_parallel_size > 1: CP splits the
+      # sequence across GPUs, so the loss must be summed per-token (not averaged per-sequence
+      # on each rank, which would be wrong once a sequence is split). slime's loss/cp_utils
+      # implement this path fully.
+      calculate_per_token_loss: true
+
       advantage_estimator: grpo
-      n_samples_per_prompt: 2       # small GRPO group (match CLI --n-samples-per-prompt)
+      n_samples_per_prompt: 8       # GRPO group size (match CLI --n-samples-per-prompt)
       eps_clip: 0.2
       kl_coef: 0
       use_kl_loss: false
@@ -72,4 +90,11 @@ policies:
       log_level: info
       server_groups:
         - worker_type: regular
-          num_gpus: 4               # must equal sglang_num_nodes(1) × num_gpus_per_node(4)
+          num_gpus: 16              # must equal sglang_num_nodes(2) × num_gpus_per_node(8) → 4 engines of tp4
+          overrides:                # per-group SGLang ServerArgs overrides
+            # Colocate auto-enables enable_memory_saver (torch_memory_saver). SGLang's
+            # custom all-reduce registers CUDA-IPC buffers that the memory saver's
+            # virtual-memory remapping invalidates → "custom_all_reduce.cuh: CUDA error:
+            # invalid argument" crash during CUDA-graph capture. Fall back to NCCL
+            # all-reduce, which is memory-saver-safe.
+            disable_custom_all_reduce: true
