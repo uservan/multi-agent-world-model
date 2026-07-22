@@ -1,5 +1,6 @@
 import os
 import json
+import random
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -63,7 +64,14 @@ def run(args: PipelineConfig) -> None:
         logger.success("All platforms already processed.")
         return
 
-    client = LLMClient.from_config(args)
+    # Shuffle so retries don't always front-load the same (hard) platforms.
+    random.shuffle(pending)
+
+    client = LLMClient.from_config(args, extra_llm_params=args.think_llm_params)
+    if args.think_llm_params:
+        logger.info(f"Reason mode ON for env generation: {args.think_llm_params}")
+    else:
+        logger.info("Reason mode OFF for env generation (think_llm_params empty)")
 
     success = failed_count = 0
     with ThreadPoolExecutor(max_workers=args.concurrency) as executor:

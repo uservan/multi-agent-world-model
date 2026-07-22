@@ -32,7 +32,9 @@ def run(args: PipelineConfig, task_file: str, *, platform_locks: PlatformLocks |
         logger.success("No servers need revision.")
         return
 
-    client = LLMClient.from_config(args)
+    client = LLMClient.from_config(args, extra_llm_params=args.think_llm_params)
+    if args.think_llm_params:
+        logger.info(f"Reason mode ON for env fix: {args.think_llm_params}")
 
     success = failed_count = 0
     for name in pending:

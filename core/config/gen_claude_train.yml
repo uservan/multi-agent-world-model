@@ -13,10 +13,14 @@ base_url: null              # ignored on the Bedrock path
 aws_region: us-east-1       # Bedrock region
 
 # ── LLM tuning ──────────────────────────────────────────────────────────────
-# NOTE: llm_params (chat_template_kwargs etc.) and min_completion_tokens are
-# OpenAI-path only; the Bedrock path ignores them. Claude extended thinking would
-# need a code change in utils/llm.py (_complete_bedrock), not a yml kwarg.
+# llm_params merge verbatim into every request (both OpenAI and Bedrock paths).
+# think_llm_params merge OVER llm_params for the env generate/fix steps ONLY —
+# reason mode for the heaviest code-generation/debugging steps; {} = off.
+# Opus 4.8 / Sonnet 5 reject the old {type: enabled, budget_tokens} form; use adaptive+effort.
 llm_params: {}
+think_llm_params: {}
+  # thinking: {type: adaptive}
+  # output_config: {effort: medium}    # env fix较难可提到 high
 min_completion_tokens: null
 
 # ── Output paths (distinct dir so Claude data doesn't mix with other models) ──
@@ -27,10 +31,10 @@ scenario_input: outputs/scenario_platform.yml   # platform pool fed into scenari
 # ── Concurrency / retries ───────────────────────────────────────────────────
 concurrency: 16             # parallel structure workers
 max_retries: 3              # per-LLM-call retries
-max_completion_tokens: 65536
+max_completion_tokens: 128000   # Opus 4.8 output cap is exactly 128000 (131072 is rejected)
 
 # ── Generation scale ────────────────────────────────────────────────────────
-budget_list: [3,5,7,8,9,11,13]   # task "budget" buckets = total sub-agents across scenes
+budget_list: [3,5,7,8,9,11,13,15]   # task "budget" buckets = total sub-agents across scenes
 num_structures: 60               # distinct scene/platform structures per budget
 tasks_per_structure: 10           # accepted tasks to collect per structure
 max_task_attempts: 5             # outer passes over task generation
@@ -53,7 +57,8 @@ embed_model: text-embedding-3-large   # embeddings use real OpenAI (EMBEDDING_OP
 max_results: 5              # max results an action returns in the spec
 
 # ── env.py (FastAPI server generation) ──────────────────────────────────────
-env_max_retries: 4          # retries when a generated server fails to start
+env_max_retries: 5          # TOTAL attempts per platform; 1 = single shot (fast first pass),
+                            # raise to 4-5 on a second pass to grind the hard ones
 
 # ── data.py (seed DB distractors) ───────────────────────────────────────────
 num_distractors: 10         # default distractor rows per table

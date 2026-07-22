@@ -33,14 +33,16 @@ class LLMClient:
         self._min_completion_tokens = int(min_completion_tokens) if min_completion_tokens is not None else None
 
     @classmethod
-    def from_config(cls, cfg, api_key: str | None = None, base_url: str | None = None) -> "LLMClient":
+    def from_config(cls, cfg, api_key: str | None = None, base_url: str | None = None,
+                    extra_llm_params: dict | None = None) -> "LLMClient":
         """Build from a config object (PipelineConfig / EvalConfig). LLM tuning flows from cfg;
-        api_key/base_url may be overridden (eval passes per-role orch_/sub_ values)."""
+        api_key/base_url may be overridden (eval passes per-role orch_/sub_ values).
+        extra_llm_params merge OVER cfg.llm_params (e.g. cfg.think_llm_params for env steps)."""
         return cls(
             api_key=api_key if api_key is not None else getattr(cfg, "api_key", None),
             base_url=base_url if base_url is not None else getattr(cfg, "base_url", None),
             aws_region=getattr(cfg, "aws_region", "us-east-1"),
-            llm_params=getattr(cfg, "llm_params", None),
+            llm_params={**(getattr(cfg, "llm_params", None) or {}), **(extra_llm_params or {})},
             min_completion_tokens=getattr(cfg, "min_completion_tokens", None),
         )
 
@@ -72,7 +74,7 @@ class LLMClient:
             self._bedrock_client = boto3.session.Session().client(
                 "bedrock-runtime",
                 region_name=self._aws_region,
-                config=Config(read_timeout=600, connect_timeout=10),
+                config=Config(read_timeout=1200, connect_timeout=10),
             )
         return self._bedrock_client
 
@@ -192,10 +194,16 @@ class LLMClient:
 
         body: dict = {
             "anthropic_version": "bedrock-2023-05-31",
-            "max_tokens": max_tokens,
+            "max_tokens": self._floor_max_tokens(max_tokens),
             "messages": filtered,
         }
         if system:
             body["system"] = system
+        # Same config passthrough as _complete_bedrock_usage: llm_params merge verbatim
+        # into the request body (thinking, output_config, temperature, ...);
+        # "extra_body" is an OpenAI-client envelope — skip it here.
+        body.update({k: v for k, v in self._llm_params.items() if k != "extra_body"})
 
-        return self._invoke_bedrock(model, body)["content"][0]["text"]
+        parsed = self._invoke_bedrock(model, body)
+        # With thinking enabled the first block may be a thinking block — join text blocks only.
+        return "".join(b.get("text", "") for b in parsed.get("content", []) if b.get("type") == "text")

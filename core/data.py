@@ -2,6 +2,7 @@ from __future__ import annotations
 import os
 import json
 import hashlib
+import random
 import sqlite3
 import threading
 import time
@@ -691,6 +692,8 @@ def run(args: PipelineConfig) -> None:
     write_lock = threading.Lock()
 
     pending = [t for t in tasks if not (records.get(t["task_id"]) and records[t["task_id"]].get("fingerprint") == _task_fingerprint(t))]
+    # Shuffle so mid-run progress samples all budget buckets evenly (file order groups them).
+    random.shuffle(pending)
     skipped = len(tasks) - len(pending)
     if skipped:
         logger.info(f"Skipping {skipped} already-completed tasks, {len(pending)} to process.")

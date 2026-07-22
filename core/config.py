@@ -24,6 +24,12 @@ class PipelineConfig:
     #   GLM-5.2 no-think:  {"extra_body": {"chat_template_kwargs": {"enable_thinking": False}}}
     # Empty default = Kimi thinking mode (its default). Edit here / per-run, no code change.
     llm_params: dict = field(default_factory=dict)
+    # Thinking-mode LLM params for the env generate/fix steps ONLY (the heaviest reasoning in the
+    # pipeline). Merged OVER llm_params for those two steps; {} = thinking off, behavior unchanged.
+    # Free-form like llm_params — each model family has its own switch:
+    #   Bedrock Claude (Opus 4.8 / Sonnet 5): {"thinking": {"type": "adaptive"}, "output_config": {"effort": "medium"}}
+    #   GLM-style OpenAI path:                {"extra_body": {"chat_template_kwargs": {"enable_thinking": true}}}
+    think_llm_params: dict = field(default_factory=dict)
     # Floor on max_completion_tokens so a small per-call cap isn't eaten by reasoning → empty content.
     min_completion_tokens: int | None = 1024 * 64
     concurrency: int = 16

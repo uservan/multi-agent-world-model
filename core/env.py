@@ -823,7 +823,8 @@ def process_platform(
         except Exception as e:
             logger.warning(f"[{name}] Revision analysis failed: {e}")
 
-    for attempt in range(1, max_retries + 5):
+    # max_retries = TOTAL attempts (env_max_retries in config); 1 = single shot, no retry.
+    for attempt in range(1, max_retries + 1):
         try:
             if is_revision:
                 code = apply_revision(client, model, name, spec_item, schema_item, current_base_code,
@@ -834,7 +835,7 @@ def process_platform(
                                      error_summaries if error_summaries else None, max_completion_tokens, max_results)
         except Exception as e:
             logger.warning(f"[{name}] LLM call failed (attempt {attempt}): {e}")
-            if attempt <= max_retries:
+            if attempt < max_retries:
                 time.sleep(2 ** attempt)
             continue
 
@@ -846,7 +847,7 @@ def process_platform(
 
         if not code or not code.startswith(("import", "from")):
             logger.warning(f"[{name}] Invalid code format (attempt {attempt}), {len(code)}")
-            if attempt <= max_retries:
+            if attempt < max_retries:
                 error_summaries.append("The response must be pure Python code starting with an import statement. No markdown, no JSON wrapper.")
             continue
 
@@ -868,14 +869,14 @@ def process_platform(
             }
 
         logger.warning(f"[{name}] Server test failed (attempt {attempt}):\n{error_output}")
-        if attempt <= max_retries:
+        if attempt < max_retries:
             summary = summarize_error(client, model, error_output, code, max_completion_tokens)
             error_summaries.append(summary)
             if is_revision and code:
                 current_base_code = code  # next attempt builds on latest generated code
             time.sleep(2)
 
-    logger.error(f"[{name}] All {max_retries + 1} attempts failed — skipping.")
+    logger.error(f"[{name}] All {max_retries} attempts failed — skipping.")
     return None
 
 

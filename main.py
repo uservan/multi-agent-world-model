@@ -89,13 +89,13 @@ def run_generate(args: PipelineConfig) -> None:
     logger.info("=== Step 1/7: Scenario ===")
     scenario_step.run(args)
 
-    logger.info("=== Step 2/7: Task ===")
-    for attempt in range(1, args.max_task_attempts + 1):
-        logger.info(f"Task generation attempt {attempt}/{args.max_task_attempts}")
-        task_step.run(args)
+    # logger.info("=== Step 2/7: Task ===")
+    # for attempt in range(1, args.max_task_attempts + 1):
+    #     logger.info(f"Task generation attempt {attempt}/{args.max_task_attempts}")
+    #     task_step.run(args)
 
-    logger.info("=== Step 2.5/7: Consolidate (merge near-duplicate actions) ===")
-    consolidate_step.run(args)
+    # logger.info("=== Step 2.5/7: Consolidate (merge near-duplicate actions) ===")
+    # consolidate_step.run(args)
 
     # logger.info("=== Step 3/7: Schema ===")
     # schema_step.run(args)
@@ -106,8 +106,8 @@ def run_generate(args: PipelineConfig) -> None:
     # logger.info("=== Step 5/7: Env (FastAPI servers) [generate] ===")
     # env_generate_step.run(args)
 
-    # logger.info("=== Step 6/7: Data (seed DBs) ===")
-    # data_step.run(args)
+    logger.info("=== Step 6/7: Data (seed DBs) ===")
+    data_step.run(args)
 
     # logger.info("=== Step 6.5/7: Verifier Gen (generate + sanity check) ===")
     # verifier_gen_step.run(args)
