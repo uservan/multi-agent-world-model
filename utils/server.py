@@ -36,6 +36,20 @@ def wait_for_server(port: int, timeout: float = 30.0) -> bool:
     return False
 
 
+def _server_python() -> str:
+    """Interpreter used to run a platform server.
+
+    Defaults to sys.executable (correct for eval, which already runs under the venv).
+    Under RL training it must be overridden via AWM_SERVER_PYTHON: there the caller is a
+    ray worker running SYSTEM python, because megatron requires numpy 1.x while this
+    project's venv carries numpy 2.x (mcp-agent needs >=2.1.3). System python has no
+    fastapi/sqlalchemy, so spawning the server with sys.executable dies with
+    "ModuleNotFoundError: No module named 'sqlalchemy'" and every platform fails to start.
+    Pointing this at the venv python keeps the two interpreters cleanly separated.
+    """
+    return os.environ.get("AWM_SERVER_PYTHON") or sys.executable
+
+
 def start_server(server_path: str, db_path: str) -> tuple[subprocess.Popen, int]:
     """Launch a generated FastAPI server bound to db_path on a free port."""
     port = get_free_port()
@@ -44,7 +58,7 @@ def start_server(server_path: str, db_path: str) -> tuple[subprocess.Popen, int]
     env["HOST"] = "127.0.0.1"
     env["DATABASE_PATH"] = f"sqlite:///{db_path}"
     proc = subprocess.Popen(
-        [sys.executable, server_path],
+        [_server_python(), server_path],
         env=env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

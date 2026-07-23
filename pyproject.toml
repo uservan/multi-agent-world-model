@@ -11,6 +11,11 @@ dependencies = [
     "fastapi-mcp>=0.3.3",
     "loguru>=0.7.3",
     "mcp-agent>=0.2.6",
+    # NOTE: numpy 2.x here is fine and REQUIRED by mcp-agent (>=2.1.3), but it means this
+    # venv can NEVER be the interpreter that runs megatron — megatron asserts numpy 1.x
+    # (slime/.../initialize.py:66 "Megatron does not support numpy 2.x"). Hence the split:
+    # ray workers/megatron run SYSTEM python (numpy 1.26.4), and only the eval platform
+    # server subprocess runs this venv (see AWM_SERVER_PYTHON in utils/server.py).
     "numpy>=2.4.6",
     "openai>=2.17.0",
     "pyyaml>=6.0.3",

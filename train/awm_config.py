@@ -9,7 +9,7 @@ Two orthogonal axes control the policy structure (see train/rollout.py):
   - share_model:  orchestrator and sub-agent are the SAME policy (one ckpt) vs separate.
   - train_roles:  which roles' tokens become trainable samples. Today ["orch"]; later
                   ["orch", "sub"] to co-train the sub-agent — rollout code is unchanged,
-                  you only flip this + add the policy to config.yaml.
+                  you only flip this + add the policy to config_train27.yaml.
 """
 from __future__ import annotations
 

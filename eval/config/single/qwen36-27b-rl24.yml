@@ -1,11 +1,11 @@
-# Single-agent eval — one model does everything.   model: Qwen3.5-35B-A3B
+# Single-agent eval — one model does everything.   model: Qwen3.6-27B-RL-iter24
 mode: single
 
-orch_model: Qwen3.5-35B-A3B
+orch_model: Qwen3.6-27B-RL-iter24
 orch_api_key: EMPTY
-orch_base_url: http://127.0.0.1:30001/v1
-orch_input_cost: 1.4e-07
-orch_output_cost: 1.0e-06
+orch_base_url: http://127.0.0.1:30000/v1
+orch_input_cost: 1.5e-07
+orch_output_cost: 6.0e-07
 orch_llm_params:
   temperature: 0.6
 
@@ -18,4 +18,4 @@ max_turns: 200   # episode ends ONLY on <done> or this cap
 
 # Data sources
 data_root: outputs/test_gen_by_claude   # derives task_final / platforms / envs / databases / servers
-eval_root: outputs/new_eval/qwen35-35b_single
+eval_root: outputs/new_eval/qwen36-27b-rl24_single

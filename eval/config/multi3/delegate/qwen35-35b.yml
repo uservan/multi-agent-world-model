@@ -4,7 +4,7 @@ mode: multi
 
 orch_model: Qwen3.5-35B-A3B
 orch_api_key: EMPTY
-orch_base_url: http://127.0.0.1:30000/v1
+orch_base_url: http://127.0.0.1:30001/v1
 orch_input_cost: 1.4e-07
 orch_output_cost: 1.0e-06
 orch_llm_params:
@@ -12,7 +12,7 @@ orch_llm_params:
 
 sub_model: Qwen3.5-35B-A3B
 sub_api_key: EMPTY
-sub_base_url: http://127.0.0.1:30000/v1
+sub_base_url: http://127.0.0.1:30001/v1
 sub_input_cost: 1.4e-07
 sub_output_cost: 1.0e-06
 sub_llm_params:

@@ -1,0 +1,158 @@
+# L3 TRAIN config — full GRPO training step on Qwen3.6-27B (rollout + reward + weight update).
+# Full-training policy/megatron/sglang config: run WITHOUT --debug-rollout-only, so the
+# megatron actor is real (builds model via mbridge from
+# hf_checkpoint, computes GRPO loss, updates weights, syncs back to sglang).
+#
+# GPU layout (single node, 8 GPUs, NON-colocate): actor(megatron tp4×pp1=4) on 4 GPUs,
+# sglang(tp4) on the other 4. This is the exact placement L2 ran (proven).
+
+policies:
+
+  - name: orchestrator
+    role: actor
+
+    hf_checkpoint: /tmp/instance_storage/models/Qwen3.6-27B   # local fast disk (sglang serve + mbridge source)
+    ref_load: /tmp/instance_storage/models/Qwen3.6-27B        # bridge mode: load falls back here (HF weights) on first run
+    load: /shared/dedicated-fsx-data-repo-training-gl-eks-us-west-2/home/jwanyang/multi-agent-world-model/save/qwen3.6-27b/model   # resume dir (absent on first run → falls back to ref_load)
+    save: /shared/dedicated-fsx-data-repo-training-gl-eks-us-west-2/home/jwanyang/multi-agent-world-model/save/qwen3.6-27b/model   # weight checkpoint dir
+
+    buffer_mode: split
+
+    num_gpus_per_node: 8          # 2 nodes: 2 × 8 = 16 GPU (colocate)
+    megatron_num_nodes: 2         # actor across 2 nodes: tp4 × cp4 × pp1 = 16 GPU, dp=1
+                                  # dp=2 is the ONLY way to use all 4 nodes: tp*cp is hard-capped at
+                                  # 16 by linear_num_key_heads (see cp note below), so the extra 16
+                                  # GPUs can only hold a second data-parallel replica.
+                                  # ⚠ dp2 WAS TRIED 2026-07-18 AND FAILED — do not retry without a patch.
+                                  # dp_schedule.py:160: with use_dynamic_batch_size=false the
+                                  # micro-batch count K must be divisible by dp_size, and at mbs=1
+                                  # K == sample count — which this multi-agent rollout decides at
+                                  # runtime (one sample per orchestrator turn). Even → fine; odd →
+                                  # hard AssertionError. Observed 950 and 802 (both even) but that is
+                                  # luck, not a guarantee. If a step dies with "static path: num_mbs
+                                  # is not a multiple of dp_size", that is this.
+                                  # Actual dp2 run (logs/train/dp2_test_0718_1514.log): rollout produced
+                                  # 1089 samples — ODD — and it died with exactly that assertion. Earlier
+                                  # runs saw 950 and 802 (both even) purely by luck; expect ~50% of steps
+                                  # to die. Worse, dp2's rollout measured SLOWER per sample (3.47s vs
+                                  # 1.05s at 4 engines), so there was no upside to pay the patch for.
+    sglang_num_nodes: 2           # sglang across 2 nodes: 16 GPU / tp4 = 4 engines
+
+    megatron:
+      megatron_to_hf_mode: bridge
+      tensor_model_parallel_size: 4
+      pipeline_model_parallel_size: 1
+      # tp4 × cp4 × pp1 = 16 = all GPUs → dp=1. TWO reasons for context-parallel (cp) here:
+      #  (1) The multi-agent rollout emits ONE training sample per orchestrator turn, so the
+      #      per-rollout sample count is variable (e.g. 1150) and rarely divisible by dp_size.
+      #      GDN forbids sequence packing (use_dynamic_batch_size=false → static dp schedule,
+      #      which requires num_mbs % (dp_size·mb_group) == 0). dp=1 removes that constraint.
+      #  (2) cp splits each long sequence across 4 GPUs (a 32K trajectory → 8K/GPU), which keeps
+      #      the huge-vocab (248320) logits from OOMing on a single tp4 group.
+      #
+      # DO NOT raise cp to 8: megatron asserts linear_num_key_heads % (tp*cp) == 0, and this
+      # model's GDN linear-attention has only 16 key heads → tp*cp must DIVIDE 16, so tp4*cp4=16
+      # is already the ceiling. cp8 gives tp*cp=32 and dies in model_provider with
+      # "linear_num_key_heads=16 must be a multiple of (tp=4 * cp=8)" (tried 2026-07-18).
+      # Corollary: per-GPU logits ∝ tokens*vocab/(tp*cp) is CAPPED here — no parallelism change
+      # (and no extra node) can shrink it further. Fix train-step OOM with micro_batch_size below.
+      context_parallel_size: 4
+      expert_model_parallel_size: 1
+      expert_tensor_parallel_size: 1
+
+      # Chunk the [T, V] logits along T when computing log_probs/entropy. THE lever for this
+      # model: vocab is 248320 (tp4 → 62080/GPU) and logits are fp32, so one full logits copy
+      # is ~2.67GB at T≈11.5k. Unchunked, loss.py:861 passes with_entropy=True (hardcoded) and
+      # ppo_utils.py:676 makes TWO full-size clones live at once (~5.3GB of pure overhead) —
+      # that is what OOM'd at mbs=2 (2026-07-18, train27_mbs2_split_0718_0450.log: tried to
+      # alloc 2.67GB with 2.37GB free). Chunked, only one 1024-row slice is cloned (~0.24GB).
+      # slime's own note calls this "critical for vocab-heavy models"; it had never been on.
+      # NOTE: this shrinks the CLONES, not the base logits tensor, so it frees ~5GB — enough
+      # to fit, but micro_batch_size still scales the base tensor. Raise mbs only after
+      # reading actual free_GB from a successful step.
+      log_probs_chunk_size: 1024
+
+      recompute_granularity: full
+      recompute_method: uniform
+      recompute_num_layers: 1
+
+      attention_dropout: 0.0
+      hidden_dropout: 0.0
+      accumulate_allreduce_grads_in_fp32: true
+      attention_softmax_in_fp32: true
+
+      micro_batch_size: 1          # BACK TO 1 — the only value ever proven to fit on this setup.
+                                    # 2026-07-18 evidence: mbs=4 OOM'd (needed 2.72GB), mbs=2 OOM'd
+                                    # TWICE at ~46% of the step (train27_mbs2_split / train27_chunk1024),
+                                    # both times on the long-sequence tail. Measured breakdown from
+                                    # the chunk1024 run: megatron resident = 38.8GB, but activations
+                                    # grow it to 119GB mid-step — and recompute is ALREADY maxed
+                                    # (granularity=full, num_layers=1), so tokens-per-microbatch is
+                                    # the only remaining lever, i.e. mbs. Raise this again ONLY with
+                                    # a measured free_GB from a step that actually completed.
+                                    # Old note (why it was raised): mbs=1 → ~861 tiny mbs/step @ ~2% MFU.
+                                    # mbs=4 OOM'd at the GRPO step (2026-07-18, logs/train/
+                                    # train27_mbs4_0717_2307.log): ppo_utils.py:676 logits.clone()
+                                    # for entropy tried to alloc 2.72GiB with only 3.45GiB free.
+                                    # Peak-mb logits ∝ mbs, and tp*cp is capped at 16 (see cp note
+                                    # above) so parallelism CANNOT relieve it → mbs is the lever.
+                                    # mbs=2 ≈ halves the peak-mb logits vs 4, keeps ~430 mbs/step
+                                    # (vs 861 at mbs=1). If it still OOMs, drop to 1 (proven: ~100GB
+                                    # free). dp=1 so align_to=1, any mbs is legal. bshd pads each
+                                    # sample only to the max WITHIN its own micro-batch.
+      global_batch_size: 64         # = rollout_batch_size(8) × n_samples(8) = 64 groups → 1 optim step/rollout
+      # This Qwen3.5 hybrid model has GDN (gated-delta-net / linear-attention) layers,
+      # and megatron's GDN forward raises "does not support packed sequence". Dynamic
+      # batching packs sequences (qkv_format=thd) → must be OFF, paired with
+      # --qkv-format bshd (non-packed) + micro_batch_size, so packed_seq_params is None.
+      use_dynamic_batch_size: false
+      max_tokens_per_gpu: 16384
+
+      optimizer: adam
+      lr: 1.0e-6
+      lr_decay_style: constant
+      weight_decay: 0.1
+      adam_beta1: 0.9
+      adam_beta2: 0.98
+      optimizer_cpu_offload: true
+      overlap_cpu_optimizer_d2h_h2d: true
+      use_precision_aware_optimizer: true
+
+      save_interval: 1              # EVERY step. Was 100 → with ~24 steps per epoch nothing was ever
+                                    # written, and the two successful steps on 2026-07-18 lost their
+                                    # weight updates entirely (save/qwen3.6-27b/model was still empty).
+                                    # A step costs ~1.6-2.8h here and the SDB job expires in 24h, so a
+                                    # run only ever gets ~3-4 steps in — checkpointing every step is what
+                                    # lets the next job resume via `load:` instead of restarting from HF.
+                                    # /shared has 109T free; checkpoint size is not a constraint.
+
+      # Required by the Qwen3-VL bridge whenever context_parallel_size > 1: CP splits the
+      # sequence across GPUs, so the loss must be summed per-token (not averaged per-sequence
+      # on each rank, which would be wrong once a sequence is split). slime's loss/cp_utils
+      # implement this path fully.
+      calculate_per_token_loss: true
+
+      advantage_estimator: grpo
+      n_samples_per_prompt: 8       # GRPO group size (match CLI --n-samples-per-prompt)
+      eps_clip: 0.2
+      kl_coef: 0
+      use_kl_loss: false
+      kl_loss_coef: 0
+
+    sglang:
+      update_weights: true
+      num_gpus_per_engine: 4        # tp4 on the 4 rollout GPUs
+      mem_fraction_static: 0.8
+      chunked_prefill_size: 4096
+      max_running_requests: 256
+      log_level: info
+      server_groups:
+        - worker_type: regular
+          num_gpus: 16              # must equal sglang_num_nodes(2) × num_gpus_per_node(8) → 4 engines of tp4
+          overrides:                # per-group SGLang ServerArgs overrides
+            # Colocate auto-enables enable_memory_saver (torch_memory_saver). SGLang's
+            # custom all-reduce registers CUDA-IPC buffers that the memory saver's
+            # virtual-memory remapping invalidates → "custom_all_reduce.cuh: CUDA error:
+            # invalid argument" crash during CUDA-graph capture. Fall back to NCCL
+            # all-reduce, which is memory-saver-safe.
+            disable_custom_all_reduce: true
